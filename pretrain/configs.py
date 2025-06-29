@@ -191,7 +191,7 @@ class WindowDataset(Dataset):
         return torch.tensor(sliced, dtype=torch.float32), -1
 
 train_dataset = WindowDataset(seqs_train)
-valid_dataset = WindowDataset(seqs_valid)
+valid_dataset = WindowDataset(seqs_val)
 
 train_loader = DataLoader(train_dataset,
                           batch_size=config.batch_size,
