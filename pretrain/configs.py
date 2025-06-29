@@ -160,7 +160,7 @@ class WindowDataset(Dataset):
         start = np.random.randint(0, max_start_index + 1)
 
         # Shape: [num_channels, seq_len]
-        sliced = seq[:, start:start + self.seq_len]
+        sliced = seq[:, start:start + config.seq_len]
         return torch.tensor(sliced, dtype=torch.float32)
 
 train_dataset = WindowDataset(seqs_train)
