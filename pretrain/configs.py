@@ -163,13 +163,8 @@ class WindowDataset(Dataset):
         sliced = seq[:, start:start + self.seq_len]
         return torch.tensor(sliced, dtype=torch.float32)
 
-# shape: [num_seqs, num_channels, seq_len]
-data_tensor = torch.from_numpy(all_seqs).to(torch.float32)
-
-torch.manual_seed(config.seed)
-train_dataset, valid_dataset = torch.utils.data.random_split(data_tensor,
-                                                             [num_train, num_val])
-
+train_dataset = WindowDataset(seqs_train)
+valid_dataset = WindowDataset(seqs_valid)
 
 train_loader = DataLoader(train_dataset,
                           batch_size=config.batch_size,
