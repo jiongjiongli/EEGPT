@@ -21,6 +21,7 @@ def load_fn(x):
     return x
 
 
+import json
 import numpy as np
 from pathlib import Path
 import pandas as pd
@@ -46,9 +47,11 @@ config_dict = dict(
     label_names = ["Unkown", "Aha"],
     eeg_column_names=["FP1", "FP2", "C3", "C4", "P7", "P8", "O1", "O2", "F7", "F8", "F3", "F4", "T7", "T8", "P3", "P4"],
 
+    subject_ids_file_name = "subject_ids.json",
     time_param_column_index = 1,
-    batch_size = 2,
+    batch_size = 64,
     valid_percent = 0.1,
+    test_percent = 0.1,
 
     seq_len=1024,
     segment_len=128 // 4,
@@ -71,7 +74,7 @@ config_dict = dict(
     # CPU/GPU
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
 
-    epochs=2,
+    epochs=50,
 
     model_log_dir = "./logs",
     kaggle_model_log_dir = "/kaggle/working/logs",
@@ -114,7 +117,7 @@ else:
 csv_session_dirs = list(eeg_csv_dir_path.glob("OpenBCISession_Subject_*"))
 csv_session_dirs.sort(key=get_subject_id)
 
-all_seqs = []
+seqs_infos = []
 
 pbar = tqdm(csv_session_dirs)
 
@@ -137,13 +140,37 @@ for csv_session_dir in pbar:
     seqs = seqs.reshape(num_seqs, sample_seq_len, config.num_channels)
     # shape: [num_seqs, num_channels, (seq_len * 2)]
     seqs = seqs.transpose(0, 2, 1)
-    all_seqs.append(seqs)
+    seqs_infos.append({"subject_id": subject_id, "seqs": seqs})
+
+seqs_infos_trainval, seqs_infos_test = train_test_split(seqs_infos,
+                                                        test_size=config.test_percent,
+                                                        random_state=config.seed)
+
+seqs_infos_train, finetune_seqs_infos_val = train_test_split(seqs_infos_trainval,
+                                                        test_size=config.valid_percent,
+                                                        random_state=config.seed)
+
+train_subject_ids = [seqs_info["subject_id"] for seqs_info in seqs_infos_train]
+finetune_val_subject_ids = [seqs_info["subject_id"] for seqs_info in finetune_seqs_infos_val]
+test_subject_ids = [seqs_info["subject_id"] for seqs_info in seqs_infos_test]
+
+subject_id_splits = {
+    "train": train_subject_ids,
+    "val": finetune_val_subject_ids,
+    "test": test_subjects,
+}
+
+print(subject_id_splits)
+
+with open(config.subject_ids_file_name, "w") as file_stream:
+    json.dump(subject_id_splits, file_stream, indent=4)
 
 # shape: [num_seqs, num_channels, (seq_len * 2)]
-all_seqs = np.concatenate(all_seqs, axis=0)
-seqs_train, seqs_valid = train_test_split(all_seqs,
-                                          test_size=config.valid_percent,
-                                          random_state=config.seed)
+pretrain_seqs_trainval = np.concatenate([seqs_info["seqs"] for seqs_info in seqs_infos_train],
+                                        axis=0)
+seqs_train, seqs_val = train_test_split(pretrain_seqs_trainval,
+                                        test_size=config.valid_percent,
+                                        random_state=config.seed)
 
 class WindowDataset(Dataset):
     def __init__(self, seqs):
@@ -172,6 +199,8 @@ train_loader = DataLoader(train_dataset,
 valid_loader = DataLoader(valid_dataset,
                          batch_size=config.batch_size,
                          shuffle=False)
+
+
 
 steps_per_epoch = math.ceil(len(train_loader)/len(devices))
 
