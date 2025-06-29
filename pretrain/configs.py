@@ -27,6 +27,7 @@ import pandas as pd
 from tqdm import tqdm
 from types import SimpleNamespace
 import re
+from sklearn.model_selection import train_test_split
 import torch
 from torch.utils.data import Dataset, DataLoader, TensorDataset
 
@@ -47,7 +48,7 @@ config_dict = dict(
 
     time_param_column_index = 1,
     batch_size = 2,
-    train_split_percent = 0.9,
+    valid_percent = 0.9,
 
     seq_len=1024,
     segment_len=128 // 4,
@@ -130,21 +131,40 @@ for csv_session_dir in pbar:
     # seq_len * 2 to enable sliding window to select seq_len
     sample_seq_len = config.seq_len * 2
     num_seqs = len(eeg_data_df) // sample_seq_len
-    # shape: [num_seqs * seq_len, num_channels]
+    # shape: [num_seqs * (seq_len * 2), num_channels]
     seqs = eeg_data_df.iloc[:num_seqs * sample_seq_len].to_numpy()
-    # shape: [num_seqs, seq_len, num_channels]
-    seqs = seqs.reshape(num_seqs, sample_seq_len, -1)
-    # shape: [num_seqs, num_channels, seq_len]
+    # shape: [num_seqs, (seq_len * 2), num_channels]
+    seqs = seqs.reshape(num_seqs, sample_seq_len, config.num_channels)
+    # shape: [num_seqs, num_channels, (seq_len * 2)]
     seqs = seqs.transpose(0, 2, 1)
     all_seqs.append(seqs)
 
-# shape: [num_seqs, num_channels, seq_len]
+# shape: [num_seqs, num_channels, (seq_len * 2)]
 all_seqs = np.concatenate(all_seqs, axis=0)
+seqs_train, seqs_valid = train_test_split(all_seqs,
+                                          test_size=config.valid_percent,
+                                          random_state=config.seed)
+
+class WindowDataset(Dataset):
+    def __init__(self, seqs):
+        # shape: [num_seqs, num_channels, (seq_len * 2)]
+        self.seqs = seqs
+
+    def __len__(self):
+        return len(self.seqs)
+
+    def __getitem__(self, idx):
+        # Shape: [num_channels, seq_len * 2]
+        seq = self.seqs[idx]
+        max_start_index = seq.shape[-1] - config.seq_len
+        start = np.random.randint(0, max_start_index + 1)
+
+        # Shape: [num_channels, seq_len]
+        sliced = seq[:, start:start + self.seq_len]
+        return torch.tensor(sliced, dtype=torch.float32)
 
 # shape: [num_seqs, num_channels, seq_len]
-data_tensor = torch.from_numpy(all_seqs).to(torch.float)
-num_train = int(config.train_split_percent * len(data_tensor))
-num_val = len(data_tensor) - num_train
+data_tensor = torch.from_numpy(all_seqs).to(torch.float32)
 
 torch.manual_seed(config.seed)
 train_dataset, valid_dataset = torch.utils.data.random_split(data_tensor,
