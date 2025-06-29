@@ -161,7 +161,7 @@ class WindowDataset(Dataset):
 
         # Shape: [num_channels, seq_len]
         sliced = seq[:, start:start + config.seq_len]
-        return torch.tensor(sliced, dtype=torch.float32)
+        return torch.tensor(sliced, dtype=torch.float32), -1
 
 train_dataset = WindowDataset(seqs_train)
 valid_dataset = WindowDataset(seqs_valid)
@@ -169,7 +169,7 @@ valid_dataset = WindowDataset(seqs_valid)
 train_loader = DataLoader(train_dataset,
                           batch_size=config.batch_size,
                           shuffle=True)
-valid_loader  = DataLoader(valid_dataset,
+valid_loader = DataLoader(valid_dataset,
                          batch_size=config.batch_size,
                          shuffle=False)
 
