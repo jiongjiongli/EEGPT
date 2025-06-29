@@ -173,7 +173,6 @@ valid_loader = DataLoader(valid_dataset,
                          batch_size=config.batch_size,
                          shuffle=False)
 
-
 steps_per_epoch = math.ceil(len(train_loader)/len(devices))
 
 tag = "tiny1"
