@@ -147,10 +147,9 @@ num_train = int(config.train_split_percent * len(data_tensor))
 num_val = len(data_tensor) - num_train
 
 torch.manual_seed(config.seed)
-train_data, valid_data = torch.utils.data.random_split(data_tensor,
-                                                     [num_train, num_val])
-train_dataset = TensorDataset(train_data)
-valid_dataset  = TensorDataset(valid_data)
+train_dataset, valid_dataset = torch.utils.data.random_split(data_tensor,
+                                                             [num_train, num_val])
+
 
 train_loader = DataLoader(train_dataset,
                           batch_size=config.batch_size,
