@@ -13,7 +13,7 @@ engine_pretraining.seed_torch(7)
 # init model
 
 
-model = engine_pretraining.LitEEGPT(get_config(**(configs.MODELS_CONFIGS[configs.tag])),
+model = engine_pretraining.LitEEGPT(configs.get_config(**(configs.MODELS_CONFIGS[configs.tag])),
                  USE_LOSS_A =(configs.variant != "A"),
                  USE_LN     =(configs.variant != "B"),
                  USE_SKIP   =(configs.variant != "C"))
