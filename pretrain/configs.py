@@ -157,7 +157,7 @@ test_subject_ids = [seqs_info["subject_id"] for seqs_info in seqs_infos_test]
 subject_id_splits = {
     "train": train_subject_ids,
     "val": finetune_val_subject_ids,
-    "test": test_subjects,
+    "test": test_subject_ids,
 }
 
 print(subject_id_splits)
