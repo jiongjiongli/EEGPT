@@ -43,7 +43,7 @@ class LitEEGPT(pl.LightningModule):
 
         encoder = EEGTransformer(
             # img_size=[58, 256*4],
-            img_size=[config.num_channels, 256*4],
+            img_size=[config.num_channels, config.seq_len],
             patch_size=32*2,
             mlp_ratio=4.0,
             drop_rate=0.0,
