@@ -20,7 +20,10 @@ model = engine_pretraining.LitEEGPT(configs.get_config(**(configs.MODELS_CONFIGS
 lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval='epoch')
 callbacks = [lr_monitor]
 
-trainer = pl.Trainer(strategy='auto', devices=configs.devices, max_epochs=configs.max_epochs, callbacks=callbacks,
+trainer = pl.Trainer(strategy='auto', devices=configs.devices,
+                     max_epochs=configs.max_epochs,
+                     callbacks=callbacks,
+                     log_every_n_steps=configs.config.log_every_n_steps,
                      logger=[pl_loggers.TensorBoardLogger('./logs/', name=f"EEGPT_{configs.tag}_{configs.variant}_tb"),
                              pl_loggers.CSVLogger('./logs/', name=f"EEGPT_{configs.tag}_{configs.variant}_csv")])
 trainer.fit(model, configs.train_loader, configs.valid_loader)

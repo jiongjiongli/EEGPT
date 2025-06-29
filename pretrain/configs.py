@@ -49,7 +49,6 @@ config_dict = dict(
 
     subject_ids_file_name = "subject_ids.json",
     time_param_column_index = 1,
-    batch_size = 64,
     valid_percent = 0.1,
     test_percent = 0.1,
 
@@ -74,7 +73,9 @@ config_dict = dict(
     # CPU/GPU
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
 
+    batch_size = 64,
     epochs=50,
+    log_every_n_steps=10,
 
     model_log_dir = "./logs",
     kaggle_model_log_dir = "/kaggle/working/logs",
