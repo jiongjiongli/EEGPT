@@ -48,7 +48,7 @@ config_dict = dict(
 
     time_param_column_index = 1,
     batch_size = 2,
-    valid_percent = 0.9,
+    valid_percent = 0.1,
 
     seq_len=1024,
     segment_len=128 // 4,
