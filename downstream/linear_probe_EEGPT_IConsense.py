@@ -232,7 +232,7 @@ class IconsenseDataset(Dataset):
 data_generator = DataGenerator(config)
 all_data_infos = data_generator.generate()
 
-datasets = []
+datasets = {}
 
 for split, data_infos in all_data_infos.items():
     samples = []
@@ -246,6 +246,9 @@ for split, data_infos in all_data_infos.items():
             samples.append(sample)
 
     datasets[split] = IconsenseDataset(samples)
+
+for split, dataset in datasets.items():
+    print(f"split: {split} num_samples: {len(dataset)}")
 
 
 import random
@@ -434,7 +437,7 @@ import math
 seed_torch(config.seed)
 
 train_loader = DataLoader(datasets["train"], batch_size=config.batch_size, num_workers=0, shuffle=True)
-valid_loader = DataLoader(datasets["valid"], batch_size=config.batch_size, num_workers=0, shuffle=False)
+valid_loader = DataLoader(datasets["val"], batch_size=config.batch_size, num_workers=0, shuffle=False)
 test_loader  = DataLoader(datasets["test"],  batch_size=config.batch_size, num_workers=0, shuffle=False)
 
 steps_per_epoch = math.ceil(len(train_loader) )
