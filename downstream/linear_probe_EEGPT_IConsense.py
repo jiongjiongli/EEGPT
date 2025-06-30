@@ -8,6 +8,7 @@ import re
 from sklearn.model_selection import train_test_split
 import torch
 from torch.utils.data import Dataset, DataLoader, TensorDataset
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 
 config_dict = dict(
@@ -55,16 +56,14 @@ config_dict = dict(
     # CPU/GPU
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
 
-    load_path = None,
+    load_path = "/kaggle/working/EEGPT/pretrain/checkpoints/last.ckpt",
 
     max_lr = 4e-4,
 
     batch_size = 64,
     epochs=30,
-    log_every_n_steps=10,
 
     model_log_dir = "./logs",
-    checkpoint_path = "",
     kaggle_model_log_dir = "/kaggle/working/logs",
 
     # Validate
@@ -444,15 +443,30 @@ steps_per_epoch = math.ceil(len(train_loader) )
 model = LitEEGPTCausal(load_path=config.load_path,
                        steps_per_epoch=steps_per_epoch)
 
+checkpoint_cb = ModelCheckpoint(
+    save_top_k=1,                      # save only the best checkpoint
+    monitor='valid_loss',               # metric to monitor (make sure it's logged)
+    mode='min',                       # 'min' if lower is better, 'max' otherwise
+    save_last=True,                   # also save the last checkpoint
+    dirpath='./iconsense_checkpoints/',         # directory to save checkpoints
+    filename='EEGPT_{epoch:03d}-{val_loss:.4f}'  # naming pattern
+)
+
 lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval='epoch')
-callbacks = [lr_monitor]
+callbacks = [lr_monitor, checkpoint_cb]
 
 trainer = pl.Trainer(accelerator='cuda',
                      devices=[0,],
                      max_epochs=config.epochs,
                      callbacks=callbacks,
-                     enable_checkpointing=False,
+                     log_every_n_steps=steps_per_epoch,
                      logger=[pl_loggers.TensorBoardLogger('./logs/', name="EEGPT_BCIC2A_tb", version=f"subject{i}"),
                              pl_loggers.CSVLogger('./logs/', name="EEGPT_BCIC2A_csv")])
 
 trainer.fit(model, train_loader, valid_loader, ckpt_path='last')
+
+# Get best checkpoint path
+print("Best model checkpoint path:", checkpoint_cb.best_model_path)
+
+# Optional: get last checkpoint
+print("Last checkpoint path:", checkpoint_cb.last_model_path)
