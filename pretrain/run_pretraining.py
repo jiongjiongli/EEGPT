@@ -21,7 +21,7 @@ model = engine_pretraining.LitEEGPT(configs.get_config(**(configs.MODELS_CONFIGS
 
 checkpoint_cb = ModelCheckpoint(
     save_top_k=1,                      # save only the best checkpoint
-    monitor='val_loss',               # metric to monitor (make sure it's logged)
+    monitor='valid_loss',               # metric to monitor (make sure it's logged)
     mode='min',                       # 'min' if lower is better, 'max' otherwise
     save_last=True,                   # also save the last checkpoint
     dirpath='./checkpoints/',         # directory to save checkpoints
