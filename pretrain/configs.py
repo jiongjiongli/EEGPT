@@ -36,12 +36,17 @@ from torch.utils.data import Dataset, DataLoader, TensorDataset
 config_dict = dict(
     seed = 17,
     data_phase = "Exam",
+
     root_dir_path=r"E:/data/eeg_data",
     kaggle_label_root_dir_path=r"/kaggle/input/eeg-labels",
     kaggle_eeg_root_dir_path=r"/kaggle/input/eeglab-output-data",
+
     input_csv_dir_name="eeg_labels",
     input_eeg_csv_dir_name="eeglab_output_data",
-    # output_dir_name="TODO",
+
+    kaggle_working_dir_path = "/kaggle/working",
+    output_dir_name="pretrain",
+
     data_cache_file_name = "all_data.pkl",
     class_name = "TagHandMenuPumpTime",
     label_names = ["Unkown", "Aha"],
@@ -74,8 +79,7 @@ config_dict = dict(
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
 
     batch_size = 64,
-    epochs=300,
-    log_every_n_steps=10,
+    epochs=10,
 
     model_log_dir = "./logs",
     kaggle_model_log_dir = "/kaggle/working/logs",
@@ -104,6 +108,7 @@ def get_subject_id(session_dir_path):
 root_dir_path = Path(config.root_dir_path)
 kaggle_label_root_dir_path = Path(config.kaggle_label_root_dir_path)
 kaggle_eeg_root_dir_path = Path(config.kaggle_eeg_root_dir_path)
+kaggle_working_dir_path = Path(config.kaggle_working_dir_path)
 
 if kaggle_label_root_dir_path.exists():
     csv_dir_path = kaggle_label_root_dir_path / config.input_csv_dir_name
@@ -140,7 +145,7 @@ for csv_session_dir in pbar:
     # shape: [num_seqs, (seq_len * 2), num_channels]
     seqs = seqs.reshape(num_seqs, sample_seq_len, config.num_channels)
     # shape: [num_seqs, num_channels, (seq_len * 2)]
-    seqs = seqs.transpose(0, 2, 1)
+    seqs = np.transpose(seqs, (0, 2, 1))
     seqs_infos.append({"subject_id": subject_id, "seqs": seqs})
 
 seqs_infos_trainval, seqs_infos_test = train_test_split(seqs_infos,
@@ -163,7 +168,18 @@ subject_id_splits = {
 
 print(subject_id_splits)
 
-with open(config.subject_ids_file_name, "w") as file_stream:
+if kaggle_working_dir_path.exists():
+    target_dir = kaggle_working_dir_path / config.output_dir_name
+else:
+    target_dir = root_dir_path / config.data_phase / config.output_dir_name
+target_dir = Path(target_dir)
+target_dir.mkdir(parents=True, exist_ok=True)
+
+target_file_name = config.subject_ids_file_name
+target_file_path = target_dir / target_file_name
+target_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+with open(target_file_path, "w") as file_stream:
     json.dump(subject_id_splits, file_stream, indent=4)
 
 # shape: [num_seqs, num_channels, (seq_len * 2)]
@@ -200,7 +216,6 @@ train_loader = DataLoader(train_dataset,
 valid_loader = DataLoader(valid_dataset,
                          batch_size=config.batch_size,
                          shuffle=False)
-
 
 
 steps_per_epoch = math.ceil(len(train_loader)/len(devices))
