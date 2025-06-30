@@ -159,7 +159,7 @@ class DataGenerator:
                     "label_index": 1,
                 },
                 {
-                    "event_df": negative_events_df
+                    "event_df": negative_events_df,
                     "label_index": 0,
                 }
             ]
