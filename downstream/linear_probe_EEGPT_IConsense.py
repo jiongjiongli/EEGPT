@@ -1,4 +1,5 @@
 import json
+import math
 import numpy as np
 from pathlib import Path
 import pandas as pd
@@ -7,9 +8,11 @@ from types import SimpleNamespace
 import re
 from sklearn.model_selection import train_test_split
 import torch
-from torch.utils.data import Dataset, DataLoader, TensorDataset
+from torch.utils.data import Dataset, DataLoader, TensorDataset, Subset
 from pytorch_lightning.callbacks import ModelCheckpoint
 import torchmetrics
+from sklearn.model_selection import StratifiedKFold
+
 
 from iconsense_finetune_dataset import SeqDatasetGenerator, get_dir_path
 
@@ -52,6 +55,9 @@ config_dict = dict(
     seq_len=1024,
     num_channels=16,
     num_classes=2,
+    negative_label_index=0,
+    trainval=True,
+    n_splits = 5,
 
     task = "binary", # "binary" or "multiclass"
 
@@ -66,15 +72,13 @@ config_dict = dict(
 
     batch_size = 64,
     epochs=10,
+    n_folds = 5,
 )
 
 config = SimpleNamespace(**config_dict)
 
 dataset_generator = SeqDatasetGenerator(config)
-datasets = dataset_generator.generate()
-
-for split, dataset in datasets.items():
-    print(f"{split}:{len(dataset)}")
+datasets_infos = dataset_generator.generate()
 
 
 import random
@@ -107,7 +111,8 @@ class LitEEGPTCausal(pl.LightningModule):
     def __init__(self,
                  load_path="../checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt",
                  steps_per_epoch=None,
-                 task=None):
+                 task=None,
+                 num_train_samples=None):
         super().__init__()
         self.chans_num = config.num_channels
         self.steps_per_epoch=steps_per_epoch
@@ -149,7 +154,9 @@ class LitEEGPTCausal(pl.LightningModule):
 
         self.drop           = torch.nn.Dropout(p=0.50)
 
-        self.loss_fn        = torch.nn.BCEWithLogitsLoss() if config.task == "binary" else torch.nn.CrossEntropyLoss()
+        pos_weight = torch.tensor([num_train_samples["num_negative"] / num_train_samples["num_positive"]])
+
+        self.loss_fn        = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight) if config.task == "binary" else torch.nn.CrossEntropyLoss()
         # self.running_scores = {"train":[], "val":[], "test":[]}
         self.is_sanity=True
 
@@ -159,6 +166,9 @@ class LitEEGPTCausal(pl.LightningModule):
             self.val_accuracy = torchmetrics.Accuracy(task=task)
             self.val_balanced_accuracy = torchmetrics.classification.BinaryAccuracy()
             self.val_cohen_kappa = torchmetrics.classification.BinaryCohenKappa()
+
+            self.val_precision = torchmetrics.Precision(task=task)
+            self.val_recall = torchmetrics.Recall()
 
             self.val_f1_macro = torchmetrics.F1Score(task=task)
             self.val_f1_micro = torchmetrics.F1Score(task=task)
@@ -171,6 +181,9 @@ class LitEEGPTCausal(pl.LightningModule):
             self.val_balanced_accuracy = torchmetrics.classification.MulticlassAccuracy(num_classes=config.num_classes)
             self.val_cohen_kappa = torchmetrics.classification.MulticlassCohenKappa(num_classes=config.num_classes)
 
+            self.val_precision = torchmetrics.Precision(task=task, num_classes=config.num_classes)
+            self.val_recall = torchmetrics.Recall(task=task, num_classes=config.num_classes)
+
             self.val_f1_macro = torchmetrics.F1Score(task=task, num_classes=config.num_classes, average="macro")
             self.val_f1_micro = torchmetrics.F1Score(task=task, num_classes=config.num_classes, average="micro")
             self.val_f1_weighted = torchmetrics.F1Score(task=task, num_classes=config.num_classes, average="weighted")
@@ -179,6 +192,8 @@ class LitEEGPTCausal(pl.LightningModule):
 
         self.preds_epoch = []
         self.targets_epoch = []
+        self.test_preds = []
+        self.test_targets = []
 
     def forward(self, x):
 
@@ -265,6 +280,26 @@ class LitEEGPTCausal(pl.LightningModule):
         self.targets_epoch.append(label.clone().detach().int())
         return loss
 
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+
+        x, logit = self.forward(x)
+
+        if config.task == "binary":
+            logit = logit.squeeze(-1)
+            label = y.float()
+        else:
+            label = y.long()
+
+        if config.task == "binary":
+            probs = torch.sigmoid(logit)
+            preds = (probs > 0.5).int()
+        else:
+            preds = torch.argmax(logit, dim=-1)
+
+        self.test_preds.append(preds.clone().detach())
+        self.test_targets.append(y.clone().detach().int())
+
 
     def on_validation_epoch_start(self) -> None:
         # self.running_scores["valid"]=[]
@@ -276,7 +311,11 @@ class LitEEGPTCausal(pl.LightningModule):
         # self.val_f1_micro.to(device)
         # self.val_f1_weighted.to(device)
 
+        self.preds_epoch = []
+        self.targets_epoch = []
+
         return super().on_validation_epoch_start()
+
     def on_validation_epoch_end(self) -> None:
         if self.is_sanity:
             self.is_sanity=False
@@ -306,28 +345,82 @@ class LitEEGPTCausal(pl.LightningModule):
         f1_micro = self.val_f1_micro(preds, targets)
         f1_weighted = self.val_f1_weighted(preds, targets)
 
+        prec = self.val_precision(preds, targets)
+        rec = self.val_recall(preds, targets)
+
         # Compute confusion matrix
         cm = self.val_cm(preds, targets)
 
-        tn, fp, fn, tp = confmat.flatten().tolist()
+        tn, fp, fn, tp = cm.flatten().tolist()
         self.log_dict({
-            "val/true_negative": tn,
-            "val/false_positive": fp,
-            "val/false_negative": fn,
-            "val/true_positive": tp,
+            "val/TN": tn,
+            "val/FP": fp,
+            "val/FN": fn,
+            "val/TP": tp,
+            "val/PR": prec,
+            "val/RC": rec,
+            "val/ACC": acc,
+            "val/F1": f1_macro,
         }, prog_bar=True)
 
-        self.log("val/accuracy", acc, prog_bar=True)
-        self.log("val/balanced_accuracy", bal_acc)
+        # self.log("val/balanced_accuracy", bal_acc)
         self.log("val/cohen_kappa", kappa)
-        self.log("val/f1_macro", f1_macro)
-        self.log("val/f1_micro", f1_micro)
-        self.log("val/f1_weighted", f1_weighted)
+        # self.log("val/f1_macro", f1_macro)
+        # self.log("val/f1_micro", f1_micro)
+        # self.log("val/f1_weighted", f1_weighted)
 
         self.preds_epoch.clear()
         self.targets_epoch.clear()
 
         return super().on_validation_epoch_end()
+
+    def on_test_epoch_start(self):
+        self.test_preds = []
+        self.test_targets = []
+
+        return super().on_test_epoch_start()
+
+    def on_test_epoch_end(self):
+        preds = torch.cat(self.test_preds)
+        targets = torch.cat(self.test_targets)
+
+        # Log metrics
+        acc = self.val_accuracy(preds, targets)
+        bal_acc = self.val_balanced_accuracy(preds, targets)
+        kappa = self.val_cohen_kappa(preds, targets)
+        f1_macro = self.val_f1_macro(preds, targets)
+        f1_micro = self.val_f1_micro(preds, targets)
+        f1_weighted = self.val_f1_weighted(preds, targets)
+
+        # Compute confusion matrix
+        cm = self.val_cm(preds, targets)
+
+        tn, fp, fn, tp = cm.flatten().tolist()
+
+        prec = self.val_precision(preds, targets)
+        rec = self.val_recall(preds, targets)
+
+        self.log_dict({
+            "test/TN": tn,
+            "test/FP": fp,
+            "test/FN": fn,
+            "test/TP": tp,
+            "test/PR": prec,
+            "test/RC": rec,
+            "test/ACC": acc,
+            "test/F1": f1_macro,
+        }, prog_bar=True)
+
+        # self.log("test/balanced_accuracy", bal_acc)
+        self.log("test/cohen_kappa", kappa)
+        # self.log("test/f1_macro", f1_macro)
+        # self.log("test/f1_micro", f1_micro)
+        # self.log("test/f1_weighted", f1_weighted)
+
+        self.test_preds.clear()
+        self.test_targets.clear()
+
+        return super().on_test_epoch_end()
 
     def configure_optimizers(self):
 
@@ -352,45 +445,56 @@ class LitEEGPTCausal(pl.LightningModule):
             {'optimizer': optimizer, 'lr_scheduler': lr_dict},
         )
 
+for datasets_info in datasets_infos:
+    fold_idx = datasets_info["fold_idx"]
+    datasets = datasets_info["datasets"]
+    num_split_neg_pos_samples = dataset_generator.get_datasets_stat(fold_idx,
+                                                                    datasets)
 
-import math
-seed_torch(config.seed)
+    seed_torch(config.seed)
 
-train_loader = DataLoader(datasets["train"], batch_size=config.batch_size, num_workers=0, shuffle=True)
-valid_loader = DataLoader(datasets["val"], batch_size=config.batch_size, num_workers=0, shuffle=False)
-test_loader  = DataLoader(datasets["test"],  batch_size=config.batch_size, num_workers=0, shuffle=False)
+    train_loader = DataLoader(datasets["train"],
+                              batch_size=config.batch_size,
+                              shuffle=True)
+    valid_loader = DataLoader(datasets["val"],
+                              batch_size=config.batch_size,
+                              shuffle=False)
+    test_loader  = DataLoader(datasets["test"],
+                              batch_size=config.batch_size,
+                              shuffle=False)
 
-steps_per_epoch = math.ceil(len(train_loader))
+    steps_per_epoch = math.ceil(len(train_loader))
 
-# init model
-model = LitEEGPTCausal(load_path=config.load_path,
-                       steps_per_epoch=steps_per_epoch,
-                       task=config.task)
+    # init model
+    model = LitEEGPTCausal(load_path=config.load_path,
+                           steps_per_epoch=steps_per_epoch,
+                           task=config.task,
+                           num_train_samples=num_split_neg_pos_samples["train"])
 
-checkpoint_cb = ModelCheckpoint(
-    save_top_k=1,                      # save only the best checkpoint
-    monitor='valid_loss',               # metric to monitor (make sure it's logged)
-    mode='min',                       # 'min' if lower is better, 'max' otherwise
-    save_last=True,                   # also save the last checkpoint
-    dirpath='./iconsense_checkpoints/',         # directory to save checkpoints
-    filename='EEGPT_{epoch:03d}-{val_loss:.4f}'  # naming pattern
-)
+    checkpoint_cb = ModelCheckpoint(
+        save_top_k=1,                      # save only the best checkpoint
+        monitor='val/F1',               # metric to monitor (make sure it's logged)
+        mode='min',                       # 'min' if lower is better, 'max' otherwise
+        save_last=True,                   # also save the last checkpoint
+        dirpath='./iconsense_checkpoints/',         # directory to save checkpoints
+        filename= f"EEGPT_{fold_idx}" + '-{epoch:03d}-{val_loss:.4f}'  # naming pattern
+    )
 
-lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval='epoch')
-callbacks = [lr_monitor, checkpoint_cb]
+    lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval='epoch')
+    callbacks = [lr_monitor, checkpoint_cb]
 
-trainer = pl.Trainer(accelerator='cuda',
-                     devices=[0,],
-                     max_epochs=config.epochs,
-                     callbacks=callbacks,
-                     log_every_n_steps=steps_per_epoch,
-                     logger=[pl_loggers.TensorBoardLogger('./logs/', name="EEGPT_ICONSENSE_tb", version=f"max_lr-{config.max_lr:.6f}"),
-                             pl_loggers.CSVLogger('./logs/', name="EEGPT_ICONSENSE_csv")])
+    trainer = pl.Trainer(accelerator='cuda',
+                         devices=[0,],
+                         max_epochs=config.epochs,
+                         callbacks=callbacks,
+                         log_every_n_steps=steps_per_epoch,
+                         logger=[pl_loggers.TensorBoardLogger('./logs/', name="EEGPT_ICONSENSE_tb", version=f"fold_idx-{fold_idx}_pos_weight-max_lr-{config.max_lr:.6f}"),
+                                 pl_loggers.CSVLogger('./logs/', name="EEGPT_ICONSENSE_csv")])
 
-trainer.fit(model, train_loader, valid_loader)
+    trainer.fit(model, train_loader, valid_loader)
 
-# Get best checkpoint path
-print("Best model checkpoint path:", checkpoint_cb.best_model_path)
+    # Get best checkpoint path
+    print("Best model checkpoint path:", checkpoint_cb.best_model_path)
 
-# Optional: get last checkpoint
-print("Last checkpoint path:", checkpoint_cb.last_model_path)
+    # Optional: get last checkpoint
+    print("Last checkpoint path:", checkpoint_cb.last_model_path)

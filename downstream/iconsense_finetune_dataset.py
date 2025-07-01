@@ -9,9 +9,9 @@ from types import SimpleNamespace
 import re
 from datetime import datetime
 import itertools
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 import torch
-from torch.utils.data import Dataset, DataLoader, TensorDataset
+from torch.utils.data import Dataset, DataLoader, TensorDataset, Subset
 
 
 def get_subject_id(session_dir_path):
@@ -103,16 +103,80 @@ class SeqDatasetGenerator:
                 # shape: [num_channels, seq_len]
                 seq = seq.T
                 sample_info = {"seq": seq, "label_index": label_index}
+
+                if config.trainval:
+                    if split in ["train", "val"]:
+                        split = "trainval"
+
                 all_sample_infos.setdefault(split, [])
                 all_sample_infos[split].append(sample_info)
 
-        datasets = {}
+        split_infos = {}
 
         for split, sample_infos in all_sample_infos.items():
-            dataset = IconsenseDataset(sample_infos)
-            datasets[split] = dataset
+            seqs = []
+            label_indices = []
 
-        return datasets
+            for sample_info in sample_infos:
+                seq = sample_info["seq"]
+                label_index = sample_info["label_index"]
+                seqs.append(seq)
+                label_indices.append(label_index)
+
+            inputs = np.array(seqs)
+            labels = np.array(label_indices)
+
+            split_info = {"inputs": inputs, "labels": labels}
+            split_infos[split] = split_info
+
+        if "trainval" in split_infos:
+            test_split_info = split_infos["test"]
+            test_dataset = IconsenseSmallDataset(test_split_info)
+
+            trainval_split_info = split_infos["trainval"]
+            trainval_inputs = trainval_split_info["inputs"]
+            trainval_labels = trainval_split_info["labels"]
+
+            skf = StratifiedKFold(n_splits=config.n_splits,
+                                  shuffle=True,
+                                  random_state=config.seed)
+
+            for fold_idx, (train_index, val_index) in enumerate(skf.split(trainval_inputs, trainval_labels)):
+                train_inputs = trainval_inputs[train_index]
+                train_labels = trainval_labels[train_index]
+
+                val_inputs = trainval_inputs[val_index]
+                val_labels = trainval_labels[val_index]
+
+                train_split_info = {
+                    "inputs": train_inputs,
+                    "labels": train_labels
+                }
+                train_dataset = IconsenseSmallDataset(train_split_info)
+
+                val_split_info = {
+                    "inputs": val_inputs,
+                    "labels": val_labels
+                }
+                val_dataset = IconsenseSmallDataset(val_split_info)
+
+                datasets = {
+                    "train": train_dataset,
+                    "val": val_dataset,
+                    "test": test_dataset,
+                }
+
+                yield {"fold_idx": fold_idx, "datasets": datasets}
+
+        else:
+            datasets = {}
+
+            for split, split_info in split_infos.items():
+                dataset = IconsenseSmallDataset(split_info)
+
+                datasets[split] = dataset
+
+            yield {"fold_idx": 0, "datasets": datasets}
 
     def load_eeg_data(self, eeg_csv_dir_path):
         config = self.config
@@ -141,6 +205,41 @@ class SeqDatasetGenerator:
 
         return eeg_data
 
+    def get_datasets_stat(self, fold_idx, datasets):
+        config = self.config
+
+        print(f"Fold {fold_idx + 1} / {config.n_splits}")
+
+        for split, dataset in datasets.items():
+            print(f"{split}:{len(dataset)}")
+
+        num_samples_dict = {}
+
+        for split, dataset in datasets.items():
+            num_samples_dict.setdefault(split, {})
+
+            for sample in dataset:
+                input_data, label_index = sample
+                num_samples_dict[split].setdefault(label_index, 0)
+                num_samples_dict[split][label_index] += 1
+
+        num_split_neg_pos_samples = {}
+
+        for split, num_split_samples in num_samples_dict.items():
+            num_negative = num_split_samples[config.negative_label_index]
+            num_positive = sum(num_split_samples.values()) - num_negative
+            neg_pos_ratio = num_negative / num_positive
+
+            print(f"{split} num_positive: {num_positive} num_negative: {num_negative} neg_pos_ratio: {neg_pos_ratio:.2f}")
+
+            num_neg_pos_samples = {
+                "num_negative": num_negative,
+                "num_positive": num_positive
+            }
+            num_split_neg_pos_samples.append(num_neg_pos_samples)
+
+        return num_split_neg_pos_samples
+
 class IconsenseDataset(Dataset):
     def __init__(self, sample_infos):
         self.sample_infos = sample_infos
@@ -155,6 +254,18 @@ class IconsenseDataset(Dataset):
         label_index = sample_info["label_index"]
         return torch.tensor(seq, dtype=torch.float32), label_index
 
+class IconsenseSmallDataset(Dataset):
+    def __init__(self, sample_infos):
+        self.inputs = sample_infos["inputs"]
+        self.labels = sample_infos["labels"]
+
+    def __len__(self):
+        return len(self.inputs)
+
+    def __getitem__(self, idx):
+        seq = self.inputs[idx]
+        label_index = self.labels[idx]
+        return torch.tensor(seq, dtype=torch.float32), label_index
 
 def main():
     config_dict = dict(
@@ -179,16 +290,21 @@ def main():
         eeg_column_names=["FP1", "FP2", "C3", "C4", "P7", "P8", "O1", "O2", "F7", "F8", "F3", "F4", "T7", "T8", "P3", "P4"],
         seq_len = 1024,
         num_channels = 16,
+
+        negative_label_index=0,
+        trainval=True,
+        n_splits = 5,
     )
 
     config = SimpleNamespace(**config_dict)
 
     dataset_generator = SeqDatasetGenerator(config)
-    datasets = dataset_generator.generate()
+    datasets_infos = dataset_generator.generate()
 
-    for split, dataset in datasets.items():
-        print(f"{split}:{len(dataset)}")
-
+    for datasets_info in datasets_infos:
+        fold_idx = datasets_info["fold_idx"]
+        datasets = datasets_info["datasets"]
+        num_split_neg_pos_samples = dataset_generator.get_datasets_stat(fold_idx, datasets)
 
 if __name__ == '__main__':
     main()
