@@ -9,22 +9,34 @@ from sklearn.model_selection import train_test_split
 import torch
 from torch.utils.data import Dataset, DataLoader, TensorDataset
 from pytorch_lightning.callbacks import ModelCheckpoint
+import torchmetrics
+
+from iconsense_finetune_dataset import SeqDatasetGenerator, get_dir_path
+
+from Modules.models.EEGPT_mcae import EEGTransformer
+
+from Modules.Network.utils import Conv1dWithConstraint, LinearWithConstraint
+# from utils_eval import get_metrics
 
 
 config_dict = dict(
-    seed = 17,
     data_phase = "Exam",
+    seed = 17,
 
-    root_dir_path=r"E:/data/eeg_data",
-    kaggle_eeg_root_dir_path=r"/kaggle/input/eeglab-output-data",
-    kaggle_working_dir_path=r"/kaggle/working",
+    input_root_dir_path=(r"E:/data/eeg_data",
+                         r"/home/iconsense/Desktop/jiongjiong_li/data/eeg_data",
+                         r"/kaggle/input"),
 
-    input_csv_dir_name="seq_labels",
-    input_eeg_csv_dir_name="eeglab_output_data",
+    output_root_dir_path = (r"E:/data/eeg_data",
+                            r"/home/iconsense/Desktop/jiongjiong_li/data/eeg_data",
+                            r"/kaggle/working"),
 
-    pretrain_input_csv_dir_name = "pretrain",
-    subject_ids_file_name = "subject_ids.json",
-    # output_dir_name="TODO",
+    input_seq_splits_dir_name="seq_splits",
+
+    input_eeg_dir_name=("eeglab_output_data",
+                        "/kaggle/input/eeglab-output-data/eeglab_output_data"),
+
+    output_dir_name="finetune_dataset",
 
     data_cache_file_name = "all_data.pkl",
     class_name = "TagHandMenuPumpTime",
@@ -36,35 +48,22 @@ config_dict = dict(
     test_percent = 0.1,
 
     seq_len=1024,
-    segment_len=128 // 4,
-
     num_channels=16,
-    emb_size=40,
-    depth=6,
     num_classes=2,
-    conv_kernel_size=25,
-    pool_stride=15,
-    pool_kernel_size=75,
 
-    att_num_heads=10,
-    forward_expansion=4,
-    drop_p=0.5,
-    forward_drop_p=0.5,
-
-    linear_reduce_factor=8,
+    task = "binary", # "binary" or "multiclass"
 
     # CPU/GPU
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
 
-    load_path = "/kaggle/working/EEGPT/pretrain/checkpoints/last.ckpt",
+    # load_path = "/kaggle/working/EEGPT/pretrain/checkpoints/last.ckpt",
+    load_path = ("/home/iconsense/Desktop/jiongjiong_li/data/EEGPT/checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt",
+                 "/kaggle/input/eegpt-pretrained-model/pytorch/default/1/EEGPT/checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt"),
 
     max_lr = 4e-4,
 
     batch_size = 64,
     epochs=30,
-
-    model_log_dir = "./logs",
-    kaggle_model_log_dir = "/kaggle/working/logs",
 
     # Validate
     validate_interval = 100,
@@ -72,183 +71,11 @@ config_dict = dict(
 
 config = SimpleNamespace(**config_dict)
 
-
-def get_subject_id(session_dir_path):
-    match_result = re.match('^OpenBCISession_Subject[_ ]([0-9]+)[_ ](.*)$', session_dir_path.stem)
-
-    subject_id = int(match_result.group(1))
-    return subject_id
-
-
-class DataGenerator:
-    def __init__(self, config):
-        self.config = config
-
-    def generate(self):
-        config = self.config
-
-        root_dir_path = Path(config.root_dir_path)
-        kaggle_working_dir_path = Path(config.kaggle_working_dir_path)
-        kaggle_eeg_root_dir_path = Path(config.kaggle_eeg_root_dir_path)
-
-        if kaggle_working_dir_path.exists():
-            csv_dir_path = kaggle_working_dir_path / config.input_csv_dir_name
-        else:
-            csv_dir_path = root_dir_path / config.data_phase / config.input_csv_dir_name
-
-        if kaggle_eeg_root_dir_path.exists():
-            eeg_csv_dir_path = kaggle_eeg_root_dir_path / config.input_eeg_csv_dir_name
-        else:
-            eeg_csv_dir_path = root_dir_path / config.data_phase / config.input_eeg_csv_dir_name
-
-        eeg_data = self.read_eeg(eeg_csv_dir_path)
-
-        if kaggle_working_dir_path.exists():
-            pretrain_dir_path = kaggle_working_dir_path / config.pretrain_input_csv_dir_name
-        else:
-            pretrain_dir_path = root_dir_path / config.data_phase / config.pretrain_input_csv_dir_name
-
-        pretrain_file_path = pretrain_dir_path / config.subject_ids_file_name
-
-        with open(pretrain_file_path, "r") as file_stream:
-            subject_id_splits = json.load(file_stream)
-
-        print(subject_id_splits)
-        subject_id_to_split = {}
-
-        for split, subject_ids in subject_id_splits.items():
-            for subject_id in subject_ids:
-                assert subject_id not in subject_id_to_split, subject_id
-                subject_id_to_split[subject_id] = split
-
-        all_data_infos = {}
-
-        csv_session_dirs = list(csv_dir_path.glob("OpenBCISession_Subject_*"))
-        csv_session_dirs.sort(key=get_subject_id)
-
-        pbar = tqdm(csv_session_dirs)
-
-        for csv_session_dir in pbar:
-            subject_id = get_subject_id(csv_session_dir)
-            csv_file_paths = list(csv_session_dir.glob("*_positive.csv"))
-
-            assert len(csv_file_paths) == 1, csv_session_dir
-
-            csv_file_path = csv_file_paths[-1]
-            pbar.set_description(f"Processing {csv_file_path}")
-
-            positive_events_df = pd.read_csv(csv_file_path)
-
-            negative_csv_file_paths = list(csv_session_dir.glob("*_negative.csv"))
-
-            assert len(negative_csv_file_paths) == 1, csv_session_dir
-
-            negative_csv_file_path = negative_csv_file_paths[-1]
-
-            negative_events_df = pd.read_csv(negative_csv_file_path)
-
-            assert subject_id in subject_id_to_split
-            split = subject_id_to_split[subject_id]
-
-            assert subject_id in eeg_data
-            eeg_data_df = eeg_data[subject_id]
-
-            event_infos = [
-                {
-                    "event_df": positive_events_df,
-                    "label_index": 1,
-                },
-                {
-                    "event_df": negative_events_df,
-                    "label_index": 0,
-                }
-            ]
-
-            for event_info in event_infos:
-                event_df = event_info["event_df"]
-                label_index = event_info["label_index"]
-
-                # seq shape: [num_channels, seq_len]
-                seqs = self.get_seqs(eeg_data_df, event_df)
-
-                all_data_infos.setdefault(split, [])
-                data_info = {"seqs": seqs, "label_index": label_index}
-                all_data_infos[split].append(data_info)
-
-        return all_data_infos
-
-    def read_eeg(self, eeg_csv_dir_path):
-        eeg_data = {}
-
-        csv_session_dirs = list(eeg_csv_dir_path.glob("OpenBCISession_Subject_*"))
-        csv_session_dirs.sort(key=get_subject_id)
-
-        pbar = tqdm(csv_session_dirs)
-
-        for csv_session_dir in pbar:
-            subject_id = get_subject_id(csv_session_dir)
-            csv_file_paths = list(csv_session_dir.glob("*_ica.csv"))
-
-            assert len(csv_file_paths) == 1, csv_session_dir
-
-            csv_file_path = csv_file_paths[-1]
-            pbar.set_description(f"Processing {csv_file_path}")
-
-            eeg_data_df = pd.read_csv(csv_file_path, usecols=config.eeg_column_names)
-
-            assert subject_id not in eeg_data, f"{subject_id}"
-            eeg_data[subject_id] = eeg_data_df
-
-        return eeg_data
-
-    def get_seqs(self, eeg_data_df, event_df):
-        seqs = []
-
-        for _, row in event_df.iterrows():
-            start = row['DataStartIndex']
-            end = row['DataEndIndex']
-            # shape: [seq_len, num_channels]
-            seq = eeg_data_df.iloc[start:end].to_numpy()
-            # shape: [num_channels, seq_len]
-            seq = np.transpose(seq, (0, 1))
-            seqs.append(seq)
-
-        return seqs
-
-class IconsenseDataset(Dataset):
-    def __init__(self, samples):
-        self.samples = samples
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        # Shape: [num_channels, seq_len]
-        sample = self.samples[idx]
-        seq, label_index = sample
-        return torch.tensor(seq, dtype=torch.float32), label_index
-
-
-data_generator = DataGenerator(config)
-all_data_infos = data_generator.generate()
-
-datasets = {}
-
-for split, data_infos in all_data_infos.items():
-    samples = []
-
-    for data_info in data_infos:
-        seqs = data_info["seqs"]
-        label_index = data_info["label_index"]
-
-        for seq in seqs:
-            sample = (seq, label_index)
-            samples.append(sample)
-
-    datasets[split] = IconsenseDataset(samples)
+dataset_generator = SeqDatasetGenerator(config)
+datasets = dataset_generator.generate()
 
 for split, dataset in datasets.items():
-    print(f"split: {split} num_samples: {len(dataset)}")
+    print(f"{split}:{len(dataset)}")
 
 
 import random
@@ -275,18 +102,14 @@ def seed_torch(seed=1029):
     torch.backends.cudnn.deterministic = True
 seed_torch(config.seed)
 
-from Modules.models.EEGPT_mcae import EEGTransformer
-
-from Modules.Network.utils import Conv1dWithConstraint, LinearWithConstraint
-from utils_eval import get_metrics
-
 use_channels_names = config.eeg_column_names
 
 class LitEEGPTCausal(pl.LightningModule):
 
     def __init__(self,
                  load_path="../checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt",
-                 steps_per_epoch=None):
+                 steps_per_epoch=None,
+                 task=None):
         super().__init__()
         self.chans_num = config.num_channels
         self.steps_per_epoch=steps_per_epoch
@@ -310,23 +133,50 @@ class LitEEGPTCausal(pl.LightningModule):
         self.chans_id       = target_encoder.prepare_chan_ids(use_channels_names)
 
         # -- load checkpoint
-        pretrain_ckpt = torch.load(load_path)
+        load_path = get_dir_path(load_path, raise_error=False)
 
-        target_encoder_stat = {}
-        for k,v in pretrain_ckpt['state_dict'].items():
-            if k.startswith("target_encoder."):
-                target_encoder_stat[k[15:]]=v
+        if load_path:
+            pretrain_ckpt = torch.load(load_path, weights_only=False)
 
-        self.target_encoder.load_state_dict(target_encoder_stat)
+            target_encoder_stat = {}
+            for k,v in pretrain_ckpt['state_dict'].items():
+                if k.startswith("target_encoder."):
+                    target_encoder_stat[k[15:]]=v
+
+            self.target_encoder.load_state_dict(target_encoder_stat)
+
         self.chan_conv       = Conv1dWithConstraint(config.num_channels, self.chans_num, 1, max_norm=1)
         self.linear_probe1   =   LinearWithConstraint(2048, 16, max_norm=1)
-        self.linear_probe2   =   LinearWithConstraint(16*16, config.num_classes, max_norm=0.25)
+        self.linear_probe2   =   LinearWithConstraint(16*16, 1, max_norm=1)
 
         self.drop           = torch.nn.Dropout(p=0.50)
 
         self.loss_fn        = torch.nn.CrossEntropyLoss()
         self.running_scores = {"train":[], "val":[], "test":[]}
         self.is_sanity=True
+
+        # Metrics (compute_on_step=False means accumulate across entire epoch)
+        if task == "binary":
+            # Binary classification metrics
+            self.val_accuracy = torchmetrics.Accuracy(task=task)
+            self.val_balanced_accuracy = torchmetrics.classification.BinaryBalancedAccuracy()
+            self.val_cohen_kappa = torchmetrics.classification.BinaryCohenKappa()
+
+            self.val_f1_macro = torchmetrics.F1Score(task=task, average="macro")
+            self.val_f1_micro = torchmetrics.F1Score(task=task, average="micro")
+            self.val_f1_weighted = torchmetrics.F1Score(task=task, average="weighted")
+        else:
+            assert task == "multiclass", task
+            self.val_accuracy = torchmetrics.Accuracy(task=task, num_classes=config.num_classes)
+            self.val_balanced_accuracy = torchmetrics.classification.MulticlassBalancedAccuracy(num_classes=num_classes)
+            self.val_cohen_kappa = torchmetrics.classification.MulticlassCohenKappa(num_classes=num_classes)
+
+            self.val_f1_macro = torchmetrics.F1Score(task=task, num_classes=num_classes, average="macro")
+            self.val_f1_micro = torchmetrics.F1Score(task=task, num_classes=num_classes, average="micro")
+            self.val_f1_weighted = torchmetrics.F1Score(task=task, num_classes=num_classes, average="weighted")
+
+        self.preds_epoch = []
+        self.targets_epoch = []
 
     def forward(self, x):
 
@@ -382,7 +232,7 @@ class LitEEGPTCausal(pl.LightningModule):
             y_score.append(y)
         label = torch.cat(label, dim=0)
         y_score = torch.cat(y_score, dim=0)
-        print(label.shape, y_score.shape)
+        # print(label.shape, y_score.shape)
 
         metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted", "f1_macro", "f1_micro"]
         results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics, False)
@@ -431,20 +281,19 @@ class LitEEGPTCausal(pl.LightningModule):
         )
 
 
-data_path = "../datasets/downstream/Data/BCIC_2a_0_38HZ"
 import math
-# used seed: 7
 seed_torch(config.seed)
 
 train_loader = DataLoader(datasets["train"], batch_size=config.batch_size, num_workers=0, shuffle=True)
 valid_loader = DataLoader(datasets["val"], batch_size=config.batch_size, num_workers=0, shuffle=False)
 test_loader  = DataLoader(datasets["test"],  batch_size=config.batch_size, num_workers=0, shuffle=False)
 
-steps_per_epoch = math.ceil(len(train_loader) )
+steps_per_epoch = math.ceil(len(train_loader))
 
 # init model
 model = LitEEGPTCausal(load_path=config.load_path,
-                       steps_per_epoch=steps_per_epoch)
+                       steps_per_epoch=steps_per_epoch,
+                       task=config.task)
 
 checkpoint_cb = ModelCheckpoint(
     save_top_k=1,                      # save only the best checkpoint
@@ -463,10 +312,10 @@ trainer = pl.Trainer(accelerator='cuda',
                      max_epochs=config.epochs,
                      callbacks=callbacks,
                      log_every_n_steps=steps_per_epoch,
-                     logger=[pl_loggers.TensorBoardLogger('./logs/', name="EEGPT_BCIC2A_tb", version=f"subject{i}"),
-                             pl_loggers.CSVLogger('./logs/', name="EEGPT_BCIC2A_csv")])
+                     logger=[pl_loggers.TensorBoardLogger('./logs/', name="EEGPT_ICONSENSE_tb", version=f"v1"),
+                             pl_loggers.CSVLogger('./logs/', name="EEGPT_ICONSENSE_csv")])
 
-trainer.fit(model, train_loader, valid_loader, ckpt_path='last')
+trainer.fit(model, train_loader, valid_loader)
 
 # Get best checkpoint path
 print("Best model checkpoint path:", checkpoint_cb.best_model_path)

@@ -38,10 +38,12 @@ config_dict = dict(
     data_phase = "Exam",
 
     root_dir_path=r"E:/data/eeg_data",
+
     kaggle_label_root_dir_path=r"/kaggle/input/eeg-labels",
+    input_csv_dir_name="eeg_labels",
+
     kaggle_eeg_root_dir_path=r"/kaggle/input/eeglab-output-data",
 
-    input_csv_dir_name="eeg_labels",
     input_eeg_csv_dir_name="eeglab_output_data",
 
     kaggle_working_dir_path = "/kaggle/working",
