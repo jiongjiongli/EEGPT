@@ -492,9 +492,30 @@ for datasets_info in datasets_infos:
                                  pl_loggers.CSVLogger('./logs/', name="EEGPT_ICONSENSE_csv")])
 
     trainer.fit(model, train_loader, valid_loader)
+    del model
+
+    print("Test on pretrain:")
+
+    model = LitEEGPTCausal(load_path=config.load_path,
+                           steps_per_epoch=steps_per_epoch,
+                           task=config.task)
+    trainer.test(model, dataloaders=test_loader)
+    del model
 
     # Get best checkpoint path
-    print("Best model checkpoint path:", checkpoint_cb.best_model_path)
+    print("Test on best model checkpoint:", checkpoint_cb.best_model_path)
+
+    model = LitEEGPTCausal(load_path=checkpoint_cb.best_model_path,
+                           steps_per_epoch=steps_per_epoch,
+                           task=config.task)
+    trainer.test(model, dataloaders=test_loader)
+    del model
 
     # Optional: get last checkpoint
-    print("Last checkpoint path:", checkpoint_cb.last_model_path)
+    print("Test on last checkpoint:", checkpoint_cb.last_model_path)
+
+    model = LitEEGPTCausal(load_path=checkpoint_cb.last_model_path,
+                           steps_per_epoch=steps_per_epoch,
+                           task=config.task)
+    trainer.test(model, dataloaders=test_loader)
+    del model

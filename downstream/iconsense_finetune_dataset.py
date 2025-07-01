@@ -236,7 +236,7 @@ class SeqDatasetGenerator:
                 "num_negative": num_negative,
                 "num_positive": num_positive
             }
-            num_split_neg_pos_samples.append(num_neg_pos_samples)
+            num_split_neg_pos_samples[split] = num_neg_pos_samples
 
         return num_split_neg_pos_samples
 
