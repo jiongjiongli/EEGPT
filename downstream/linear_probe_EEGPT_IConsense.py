@@ -159,21 +159,21 @@ class LitEEGPTCausal(pl.LightningModule):
         if task == "binary":
             # Binary classification metrics
             self.val_accuracy = torchmetrics.Accuracy(task=task)
-            self.val_balanced_accuracy = torchmetrics.classification.BinaryBalancedAccuracy()
+            self.val_balanced_accuracy = torchmetrics.classification.BinaryAccuracy()
             self.val_cohen_kappa = torchmetrics.classification.BinaryCohenKappa()
 
-            self.val_f1_macro = torchmetrics.F1Score(task=task, average="macro")
-            self.val_f1_micro = torchmetrics.F1Score(task=task, average="micro")
-            self.val_f1_weighted = torchmetrics.F1Score(task=task, average="weighted")
+            self.val_f1_macro = torchmetrics.F1Score(task=task)
+            self.val_f1_micro = torchmetrics.F1Score(task=task)
+            self.val_f1_weighted = torchmetrics.F1Score(task=task)
         else:
             assert task == "multiclass", task
             self.val_accuracy = torchmetrics.Accuracy(task=task, num_classes=config.num_classes)
-            self.val_balanced_accuracy = torchmetrics.classification.MulticlassBalancedAccuracy(num_classes=num_classes)
-            self.val_cohen_kappa = torchmetrics.classification.MulticlassCohenKappa(num_classes=num_classes)
+            self.val_balanced_accuracy = torchmetrics.classification.MulticlassAccuracy(num_classes=config.num_classes)
+            self.val_cohen_kappa = torchmetrics.classification.MulticlassCohenKappa(num_classes=config.num_classes)
 
-            self.val_f1_macro = torchmetrics.F1Score(task=task, num_classes=num_classes, average="macro")
-            self.val_f1_micro = torchmetrics.F1Score(task=task, num_classes=num_classes, average="micro")
-            self.val_f1_weighted = torchmetrics.F1Score(task=task, num_classes=num_classes, average="weighted")
+            self.val_f1_macro = torchmetrics.F1Score(task=task, num_classes=config.num_classes, average="macro")
+            self.val_f1_micro = torchmetrics.F1Score(task=task, num_classes=config.num_classes, average="micro")
+            self.val_f1_weighted = torchmetrics.F1Score(task=task, num_classes=config.num_classes, average="weighted")
 
         self.preds_epoch = []
         self.targets_epoch = []
