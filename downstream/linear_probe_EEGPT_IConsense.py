@@ -18,6 +18,8 @@ from Modules.models.EEGPT_mcae import EEGTransformer
 from Modules.Network.utils import Conv1dWithConstraint, LinearWithConstraint
 # from utils_eval import get_metrics
 
+torch.set_float32_matmul_precision('high')
+
 
 config_dict = dict(
     data_phase = "Exam",
@@ -60,13 +62,10 @@ config_dict = dict(
     load_path = ("/home/iconsense/Desktop/jiongjiong_li/data/EEGPT/checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt",
                  "/kaggle/input/eegpt-pretrained-model/pytorch/default/1/EEGPT/checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt"),
 
-    max_lr = 4e-4,
+    max_lr = 4e-5,
 
     batch_size = 64,
-    epochs=30,
-
-    # Validate
-    validate_interval = 100,
+    epochs=10,
 )
 
 config = SimpleNamespace(**config_dict)
@@ -88,7 +87,6 @@ from functools import partial
 import numpy as np
 import random
 import os
-import tqdm
 from pytorch_lightning import loggers as pl_loggers
 import torch.nn.functional as F
 def seed_torch(seed=1029):
@@ -151,8 +149,8 @@ class LitEEGPTCausal(pl.LightningModule):
 
         self.drop           = torch.nn.Dropout(p=0.50)
 
-        self.loss_fn        = torch.nn.CrossEntropyLoss()
-        self.running_scores = {"train":[], "val":[], "test":[]}
+        self.loss_fn        = torch.nn.BCEWithLogitsLoss() if config.task == "binary" else torch.nn.CrossEntropyLoss()
+        # self.running_scores = {"train":[], "val":[], "test":[]}
         self.is_sanity=True
 
         # Metrics (compute_on_step=False means accumulate across entire epoch)
@@ -165,6 +163,8 @@ class LitEEGPTCausal(pl.LightningModule):
             self.val_f1_macro = torchmetrics.F1Score(task=task)
             self.val_f1_micro = torchmetrics.F1Score(task=task)
             self.val_f1_weighted = torchmetrics.F1Score(task=task)
+
+            self.val_cm = torchmetrics.ConfusionMatrix(task=task)
         else:
             assert task == "multiclass", task
             self.val_accuracy = torchmetrics.Accuracy(task=task, num_classes=config.num_classes)
@@ -174,6 +174,8 @@ class LitEEGPTCausal(pl.LightningModule):
             self.val_f1_macro = torchmetrics.F1Score(task=task, num_classes=config.num_classes, average="macro")
             self.val_f1_micro = torchmetrics.F1Score(task=task, num_classes=config.num_classes, average="micro")
             self.val_f1_weighted = torchmetrics.F1Score(task=task, num_classes=config.num_classes, average="weighted")
+
+            self.val_cm = torchmetrics.ConfusionMatrix(task=task, num_classes=config.num_classes)
 
         self.preds_epoch = []
         self.targets_epoch = []
@@ -200,13 +202,28 @@ class LitEEGPTCausal(pl.LightningModule):
         # training_step defined the train loop.
         # It is independent of forward
         x, y = batch
-        y = F.one_hot(y.long(), num_classes=config.num_classes).float()
+
+        x, logit = self.forward(x)
+
+        if config.task == "binary":
+            logit = logit.squeeze(-1)
+            y = y.float()
+        else:
+            y = F.one_hot(y.long(), num_classes=config.num_classes).float()
 
         label = y
 
-        x, logit = self.forward(x)
         loss = self.loss_fn(logit, label)
-        accuracy = ((torch.argmax(logit, dim=-1)==torch.argmax(label, dim=-1))*1.0).mean()
+
+        if config.task == "binary":
+            probs = torch.sigmoid(logit)
+            preds = (probs > 0.5).int()
+
+            accuracy = ((preds == label.int())*1.0).mean()
+        else:
+            preds = torch.argmax(logit, dim=-1)
+
+            accuracy = ((preds==torch.argmax(label, dim=-1))*1.0).mean()
         # Logging to TensorBoard by default
         self.log('train_loss', loss, on_epoch=True, on_step=False)
         self.log('train_acc', accuracy, on_epoch=True, on_step=False)
@@ -217,45 +234,100 @@ class LitEEGPTCausal(pl.LightningModule):
 
         return loss
 
+    def validation_step(self, batch, batch_idx):
+        # training_step defined the train loop.
+        # It is independent of forward
+        x, y = batch
+
+        x, logit = self.forward(x)
+
+        if config.task == "binary":
+            logit = logit.squeeze(-1)
+            label = y.float()
+        else:
+            label = y.long()
+
+        loss = self.loss_fn(logit, label)
+
+        if config.task == "binary":
+            probs = torch.sigmoid(logit)
+            preds = (probs > 0.5).int()
+        else:
+            preds = torch.argmax(logit, dim=-1)
+
+        accuracy = ((preds==label.int())*1.0).mean()
+        # Logging to TensorBoard by default
+        self.log('valid_loss', loss, on_epoch=True, on_step=False)
+        self.log('valid_acc', accuracy, on_epoch=True, on_step=False)
+
+        # self.running_scores["valid"].append((label.clone().detach().cpu(), logit.clone().detach().cpu()))
+        self.preds_epoch.append(preds.clone().detach())
+        self.targets_epoch.append(label.clone().detach().int())
+        return loss
+
 
     def on_validation_epoch_start(self) -> None:
-        self.running_scores["valid"]=[]
+        # self.running_scores["valid"]=[]
+        # device = self.device
+        # self.val_accuracy.to(device)
+        # self.val_balanced_accuracy.to(device)
+        # self.val_cohen_kappa.to(device)
+        # self.val_f1_macro.to(device)
+        # self.val_f1_micro.to(device)
+        # self.val_f1_weighted.to(device)
+
         return super().on_validation_epoch_start()
     def on_validation_epoch_end(self) -> None:
         if self.is_sanity:
             self.is_sanity=False
             return super().on_validation_epoch_end()
 
-        label, y_score = [], []
-        for x,y in self.running_scores["valid"]:
-            label.append(x)
-            y_score.append(y)
-        label = torch.cat(label, dim=0)
-        y_score = torch.cat(y_score, dim=0)
+        # label, y_score = [], []
+        # for x,y in self.running_scores["valid"]:
+        #     label.append(x)
+        #     y_score.append(y)
+        # label = torch.cat(label, dim=0)
+        # y_score = torch.cat(y_score, dim=0)
         # print(label.shape, y_score.shape)
 
-        metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted", "f1_macro", "f1_micro"]
-        results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics, False)
+        # metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted", "f1_macro", "f1_micro"]
+        # results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics, False)
 
-        for key, value in results.items():
-            self.log('valid_'+key, value, on_epoch=True, on_step=False, sync_dist=True)
+        # for key, value in results.items():
+        #     self.log('valid_'+key, value, on_epoch=True, on_step=False, sync_dist=True)
+
+        preds = torch.cat(self.preds_epoch)
+        targets = torch.cat(self.targets_epoch)
+
+        acc = self.val_accuracy(preds, targets)
+        bal_acc = self.val_balanced_accuracy(preds, targets)
+        kappa = self.val_cohen_kappa(preds, targets)
+        f1_macro = self.val_f1_macro(preds, targets)
+        f1_micro = self.val_f1_micro(preds, targets)
+        f1_weighted = self.val_f1_weighted(preds, targets)
+
+        # Compute confusion matrix
+        cm = self.val_cm(preds, targets)
+
+        tn, fp, fn, tp = confmat.flatten().tolist()
+        self.log_dict({
+            "val/true_negative": tn,
+            "val/false_positive": fp,
+            "val/false_negative": fn,
+            "val/true_positive": tp,
+        }, prog_bar=True)
+
+        self.log("val/accuracy", acc, prog_bar=True)
+        self.log("val/balanced_accuracy", bal_acc)
+        self.log("val/cohen_kappa", kappa)
+        self.log("val/f1_macro", f1_macro)
+        self.log("val/f1_micro", f1_micro)
+        self.log("val/f1_weighted", f1_weighted)
+
+        self.preds_epoch.clear()
+        self.targets_epoch.clear()
+
         return super().on_validation_epoch_end()
-
-    def validation_step(self, batch, batch_idx):
-        # training_step defined the train loop.
-        # It is independent of forward
-        x, y = batch
-        label = y.long()
-
-        x, logit = self.forward(x)
-        loss = self.loss_fn(logit, label)
-        accuracy = ((torch.argmax(logit, dim=-1)==label)*1.0).mean()
-        # Logging to TensorBoard by default
-        self.log('valid_loss', loss, on_epoch=True, on_step=False)
-        self.log('valid_acc', accuracy, on_epoch=True, on_step=False)
-
-        self.running_scores["valid"].append((label.clone().detach().cpu(), logit.clone().detach().cpu()))
-        return loss
 
     def configure_optimizers(self):
 
@@ -312,7 +384,7 @@ trainer = pl.Trainer(accelerator='cuda',
                      max_epochs=config.epochs,
                      callbacks=callbacks,
                      log_every_n_steps=steps_per_epoch,
-                     logger=[pl_loggers.TensorBoardLogger('./logs/', name="EEGPT_ICONSENSE_tb", version=f"v1"),
+                     logger=[pl_loggers.TensorBoardLogger('./logs/', name="EEGPT_ICONSENSE_tb", version=f"max_lr-{config.max_lr:.6f}"),
                              pl_loggers.CSVLogger('./logs/', name="EEGPT_ICONSENSE_csv")])
 
 trainer.fit(model, train_loader, valid_loader)
