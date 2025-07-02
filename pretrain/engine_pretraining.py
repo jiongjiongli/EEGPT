@@ -254,6 +254,7 @@ class LitEEGPT(pl.LightningModule):
         return super().on_validation_epoch_start()
 
     def on_validation_epoch_end(self) -> None:
+        print(self.valid_loss1_epoch, len(self.valid_loss1_epoch))
         valid_loss1_epoch= torch.mean(torch.cat(self.valid_loss1_epoch))
         valid_loss2_epoch= torch.mean(torch.cat(self.valid_loss2_epoch))
         valid_loss_epoch= torch.mean(torch.cat(self.valid_loss_epoch))
