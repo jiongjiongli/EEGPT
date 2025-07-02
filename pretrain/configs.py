@@ -33,6 +33,10 @@ import torch
 from torch.utils.data import Dataset, DataLoader, TensorDataset
 
 
+from iconsense_pretrain_dataset import get_sub_based_dataset
+
+
+
 config_dict = dict(
     seed = 17,
     data_phase = "Exam",
@@ -88,129 +92,18 @@ config_dict = dict(
 
     # Validate
     validate_interval = 100,
+    max_lr = 5e-4,
 )
 
 config = SimpleNamespace(**config_dict)
 
-
+# datasets = get_sub_based_dataset(config)
 
 max_epochs = config.epochs
-max_lr = 5e-4
+max_lr = config.max_lr
 batch_size=config.batch_size
 devices=[0]
 
-
-def get_subject_id(session_dir_path):
-    match_result = re.match('^OpenBCISession_Subject[_ ]([0-9]+)[_ ](.*)$', session_dir_path.stem)
-
-    subject_id = int(match_result.group(1))
-    return subject_id
-
-
-root_dir_path = Path(config.root_dir_path)
-kaggle_label_root_dir_path = Path(config.kaggle_label_root_dir_path)
-kaggle_eeg_root_dir_path = Path(config.kaggle_eeg_root_dir_path)
-kaggle_working_dir_path = Path(config.kaggle_working_dir_path)
-
-if kaggle_label_root_dir_path.exists():
-    csv_dir_path = kaggle_label_root_dir_path / config.input_csv_dir_name
-else:
-    csv_dir_path = root_dir_path / config.data_phase / config.input_csv_dir_name
-
-if kaggle_eeg_root_dir_path.exists():
-    eeg_csv_dir_path = kaggle_eeg_root_dir_path / config.input_eeg_csv_dir_name
-else:
-    eeg_csv_dir_path = root_dir_path / config.data_phase / config.input_eeg_csv_dir_name
-
-csv_session_dirs = list(eeg_csv_dir_path.glob("OpenBCISession_Subject_*"))
-csv_session_dirs.sort(key=get_subject_id)
-
-seqs_infos = []
-
-pbar = tqdm(csv_session_dirs)
-
-for csv_session_dir in pbar:
-    subject_id = get_subject_id(csv_session_dir)
-    csv_file_paths = list(csv_session_dir.glob("*_ica.csv"))
-
-    assert len(csv_file_paths) == 1, csv_session_dir
-
-    csv_file_path = csv_file_paths[-1]
-    pbar.set_description(f"Processing {csv_file_path}")
-
-    eeg_data_df = pd.read_csv(csv_file_path, usecols=config.eeg_column_names)
-    # seq_len * 2 to enable sliding window to select seq_len
-    sample_seq_len = config.seq_len * 2
-    num_seqs = len(eeg_data_df) // sample_seq_len
-    # shape: [num_seqs * (seq_len * 2), num_channels]
-    seqs = eeg_data_df.iloc[:num_seqs * sample_seq_len].to_numpy()
-    # shape: [num_seqs, (seq_len * 2), num_channels]
-    seqs = seqs.reshape(num_seqs, sample_seq_len, config.num_channels)
-    # shape: [num_seqs, num_channels, (seq_len * 2)]
-    seqs = np.transpose(seqs, (0, 2, 1))
-    seqs_infos.append({"subject_id": subject_id, "seqs": seqs})
-
-seqs_infos_trainval, seqs_infos_test = train_test_split(seqs_infos,
-                                                        test_size=config.test_percent,
-                                                        random_state=config.seed)
-
-seqs_infos_train, finetune_seqs_infos_val = train_test_split(seqs_infos_trainval,
-                                                        test_size=config.valid_percent,
-                                                        random_state=config.seed)
-
-train_subject_ids = [seqs_info["subject_id"] for seqs_info in seqs_infos_train]
-finetune_val_subject_ids = [seqs_info["subject_id"] for seqs_info in finetune_seqs_infos_val]
-test_subject_ids = [seqs_info["subject_id"] for seqs_info in seqs_infos_test]
-
-subject_id_splits = {
-    "train": train_subject_ids,
-    "val": finetune_val_subject_ids,
-    "test": test_subject_ids,
-}
-
-print(subject_id_splits)
-
-if kaggle_working_dir_path.exists():
-    target_dir = kaggle_working_dir_path / config.output_dir_name
-else:
-    target_dir = root_dir_path / config.data_phase / config.output_dir_name
-target_dir = Path(target_dir)
-target_dir.mkdir(parents=True, exist_ok=True)
-
-target_file_name = config.subject_ids_file_name
-target_file_path = target_dir / target_file_name
-target_file_path.parent.mkdir(parents=True, exist_ok=True)
-
-with open(target_file_path, "w") as file_stream:
-    json.dump(subject_id_splits, file_stream, indent=4)
-
-# shape: [num_seqs, num_channels, (seq_len * 2)]
-pretrain_seqs_trainval = np.concatenate([seqs_info["seqs"] for seqs_info in seqs_infos_train],
-                                        axis=0)
-seqs_train, seqs_val = train_test_split(pretrain_seqs_trainval,
-                                        test_size=config.valid_percent,
-                                        random_state=config.seed)
-
-class WindowDataset(Dataset):
-    def __init__(self, seqs):
-        # shape: [num_seqs, num_channels, (seq_len * 2)]
-        self.seqs = seqs
-
-    def __len__(self):
-        return len(self.seqs)
-
-    def __getitem__(self, idx):
-        # Shape: [num_channels, seq_len * 2]
-        seq = self.seqs[idx]
-        max_start_index = seq.shape[-1] - config.seq_len
-        start = np.random.randint(0, max_start_index + 1)
-
-        # Shape: [num_channels, seq_len]
-        sliced = seq[:, start:start + config.seq_len]
-        return torch.tensor(sliced, dtype=torch.float32), -1
-
-train_dataset = WindowDataset(seqs_train)
-valid_dataset = WindowDataset(seqs_val)
 
 train_loader = DataLoader(train_dataset,
                           batch_size=config.batch_size,

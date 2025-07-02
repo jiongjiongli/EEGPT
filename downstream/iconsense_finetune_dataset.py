@@ -60,7 +60,7 @@ class SeqDatasetGenerator:
     def __init__(self, config):
         self.config = config
 
-    def generate(self):
+    def generate(self, pretrain=False):
         config = self.config
 
         input_root_dir_path = get_dir_path(config.input_root_dir_path)
@@ -120,6 +120,11 @@ class SeqDatasetGenerator:
             for sample_info in sample_infos:
                 seq = sample_info["seq"]
                 label_index = sample_info["label_index"]
+
+                # Pretrain: Only collect negative samples for train data
+                if pretrain and split in ["train"] and label_index != config.negative_label_index:
+                    continue
+
                 seqs.append(seq)
                 label_indices.append(label_index)
 
