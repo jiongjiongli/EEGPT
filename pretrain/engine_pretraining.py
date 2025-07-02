@@ -173,7 +173,7 @@ class LitEEGPT(pl.LightningModule):
 
         self.valid_loss1_epoch.append(loss1.clone().detach())
         self.valid_loss2_epoch.append(loss2.clone().detach())
-        self.valid_loss_epoch.append(loss2.clone().detach())
+        self.valid_loss_epoch.append(loss.clone().detach())
 
         return loss
 
@@ -197,7 +197,7 @@ class LitEEGPT(pl.LightningModule):
 
         self.train_loss1_epoch.append(loss1.clone().detach())
         self.train_loss2_epoch.append(loss2.clone().detach())
-        self.train_loss_epoch.append(loss2.clone().detach())
+        self.train_loss_epoch.append(loss.clone().detach())
 
         return loss
 
