@@ -56,7 +56,7 @@ config_dict = dict(
     num_channels=16,
     num_classes=2,
     negative_label_index=0,
-    trainval=True,
+    trainval=False,
     n_splits = 5,
 
     task = "binary", # "binary" or "multiclass"
@@ -71,7 +71,7 @@ config_dict = dict(
     max_lr = 4e-5,
 
     batch_size = 64,
-    epochs=10,
+    epochs=50,
     n_folds = 5,
 )
 
@@ -168,7 +168,7 @@ class LitEEGPTCausal(pl.LightningModule):
             self.val_cohen_kappa = torchmetrics.classification.BinaryCohenKappa()
 
             self.val_precision = torchmetrics.Precision(task=task)
-            self.val_recall = torchmetrics.Recall()
+            self.val_recall = torchmetrics.Recall(task=task)
 
             self.val_f1_macro = torchmetrics.F1Score(task=task)
             self.val_f1_micro = torchmetrics.F1Score(task=task)
@@ -272,8 +272,8 @@ class LitEEGPTCausal(pl.LightningModule):
 
         accuracy = ((preds==label.int())*1.0).mean()
         # Logging to TensorBoard by default
-        self.log('valid_loss', loss, on_epoch=True, on_step=False)
-        self.log('valid_acc', accuracy, on_epoch=True, on_step=False)
+        self.log('val_loss', loss, on_epoch=True, on_step=False)
+        self.log('val_acc', accuracy, on_epoch=True, on_step=False)
 
         # self.running_scores["valid"].append((label.clone().detach().cpu(), logit.clone().detach().cpu()))
         self.preds_epoch.append(preds.clone().detach())
@@ -498,7 +498,8 @@ for datasets_info in datasets_infos:
 
     model = LitEEGPTCausal(load_path=config.load_path,
                            steps_per_epoch=steps_per_epoch,
-                           task=config.task)
+                           task=config.task,
+                           num_train_samples=num_split_neg_pos_samples["train"])
     trainer.test(model, dataloaders=test_loader)
     del model
 
@@ -507,7 +508,8 @@ for datasets_info in datasets_infos:
 
     model = LitEEGPTCausal(load_path=checkpoint_cb.best_model_path,
                            steps_per_epoch=steps_per_epoch,
-                           task=config.task)
+                           task=config.task,
+                           num_train_samples=num_split_neg_pos_samples["train"])
     trainer.test(model, dataloaders=test_loader)
     del model
 
@@ -516,6 +518,7 @@ for datasets_info in datasets_infos:
 
     model = LitEEGPTCausal(load_path=checkpoint_cb.last_model_path,
                            steps_per_epoch=steps_per_epoch,
-                           task=config.task)
+                           task=config.task,
+                           num_train_samples=num_split_neg_pos_samples["train"])
     trainer.test(model, dataloaders=test_loader)
     del model
