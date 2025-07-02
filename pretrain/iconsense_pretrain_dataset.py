@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import re
 from sklearn.model_selection import train_test_split
 import torch
-from torch.utils.data import Dataset, DataLoader, TensorDataset
+from torch.utils.data import Dataset, DataLoader, TensorDataset, Subset
 
 from iconsense_finetune_dataset import SeqDatasetGenerator, get_dir_path
 
@@ -152,10 +152,34 @@ def get_seq_datasets(config):
         fold_idx = datasets_info["fold_idx"]
         datasets = datasets_info["datasets"]
 
-        print(f"fold_idx: {fold_idx}")
         num_split_neg_pos_samples = dataset_generator.get_datasets_stat(fold_idx, datasets)
 
-        # return datasets
+        train_dataset = datasets["train"]
+        valid_dataset = datasets["valid"]
+
+        pretrain_datasets = {}
+
+        for split, dataset in datasets.items():
+            if split == "test":
+                pretrain_datasets[split] = dataset
+            else:
+                label_to_inputs = {}
+
+                for sample in dataset:
+                    input_data, label_index = sample
+                    label_to_inputs.setdefault(label_index, [])
+                    label_to_inputs[label_index].append(input_data)
+
+                for label_index, seqs in label_to_inputs.items():
+                    inputs = np.array(seqs)
+                    labels = np.array([label_index] * len(seqs))
+
+                    samples_info = {"inputs": inputs, "labels": labels}
+                    pretrain_dataset = IconsenseSmallDataset(samples_info)
+                    pretrain_datasets.setdefault(split, {})
+                    pretrain_datasets[split][label_index] = pretrain_dataset
+
+        return pretrain_datasets
 
 
 def main():
@@ -182,6 +206,7 @@ def main():
         eeg_column_names=["FP1", "FP2", "C3", "C4", "P7", "P8", "O1", "O2", "F7", "F8", "F3", "F4", "T7", "T8", "P3", "P4"],
 
         negative_label_index=0,
+        positive_label_index=1,
         trainval=False,
 
         # subject based:

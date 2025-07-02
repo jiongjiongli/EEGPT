@@ -33,13 +33,36 @@ import torch
 from torch.utils.data import Dataset, DataLoader, TensorDataset
 
 
-from iconsense_pretrain_dataset import get_sub_based_dataset
-
+from iconsense_pretrain_dataset import get_sub_based_dataset, get_seq_datasets
 
 
 config_dict = dict(
-    seed = 17,
     data_phase = "Exam",
+
+    seed = 17,
+
+    # seq based:
+
+    input_root_dir_path=(r"E:/data/eeg_data",
+                         r"/home/iconsense/Desktop/jiongjiong_li/data/eeg_data",
+                         r"/kaggle/input"),
+
+    output_root_dir_path = (r"E:/data/eeg_data",
+                            r"/home/iconsense/Desktop/jiongjiong_li/data/eeg_data",
+                            r"/kaggle/working"),
+
+    input_seq_splits_dir_name="seq_splits",
+
+    input_eeg_dir_name=("eeglab_output_data",
+                        "/kaggle/input/eeglab-output-data/eeglab_output_data"),
+
+    eeg_column_names=["FP1", "FP2", "C3", "C4", "P7", "P8", "O1", "O2", "F7", "F8", "F3", "F4", "T7", "T8", "P3", "P4"],
+
+    negative_label_index=0,
+    positive_label_index=1,
+    trainval=False,
+
+    # subject based:
 
     root_dir_path=r"E:/data/eeg_data",
 
@@ -56,7 +79,6 @@ config_dict = dict(
     data_cache_file_name = "all_data.pkl",
     class_name = "TagHandMenuPumpTime",
     label_names = ["Unkown", "Aha"],
-    eeg_column_names=["FP1", "FP2", "C3", "C4", "P7", "P8", "O1", "O2", "F7", "F8", "F3", "F4", "T7", "T8", "P3", "P4"],
 
     subject_ids_file_name = "subject_ids.json",
     time_param_column_index = 1,
@@ -98,6 +120,10 @@ config_dict = dict(
 config = SimpleNamespace(**config_dict)
 
 # datasets = get_sub_based_dataset(config)
+datasets = get_seq_datasets(config)
+train_dataset = datasets["train"][config.negative_label_index]
+valid_dataset = datasets["val"][config.negative_label_index]
+test_dataset = datasets["test"]
 
 max_epochs = config.epochs
 max_lr = config.max_lr
@@ -109,6 +135,9 @@ train_loader = DataLoader(train_dataset,
                           batch_size=config.batch_size,
                           shuffle=True)
 valid_loader = DataLoader(valid_dataset,
+                         batch_size=config.batch_size,
+                         shuffle=False)
+test_loader = DataLoader(test_dataset,
                          batch_size=config.batch_size,
                          shuffle=False)
 
