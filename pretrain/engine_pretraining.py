@@ -227,9 +227,9 @@ class LitEEGPT(pl.LightningModule):
         return super().on_train_epoch_start()
 
     def on_train_epoch_end(self) -> None:
-        train_loss1_epoch = torch.mean(torch.cat(self.train_loss1_epoch))
-        train_loss2_epoch= torch.mean(torch.cat(self.train_loss2_epoch))
-        train_loss_epoch= torch.mean(torch.cat(self.train_loss_epoch))
+        train_loss1_epoch = torch.mean(torch.stack(self.train_loss1_epoch))
+        train_loss2_epoch= torch.mean(torch.stack(self.train_loss2_epoch))
+        train_loss_epoch= torch.mean(torch.stack(self.train_loss_epoch))
 
         self.log_dict({
             "train/Loss": train_loss_epoch,
@@ -255,9 +255,9 @@ class LitEEGPT(pl.LightningModule):
 
     def on_validation_epoch_end(self) -> None:
         print(self.valid_loss1_epoch, len(self.valid_loss1_epoch))
-        valid_loss1_epoch= torch.mean(torch.cat(self.valid_loss1_epoch))
-        valid_loss2_epoch= torch.mean(torch.cat(self.valid_loss2_epoch))
-        valid_loss_epoch= torch.mean(torch.cat(self.valid_loss_epoch))
+        valid_loss1_epoch= torch.mean(torch.stack(self.valid_loss1_epoch))
+        valid_loss2_epoch= torch.mean(torch.stack(self.valid_loss2_epoch))
+        valid_loss_epoch= torch.mean(torch.stack(self.valid_loss_epoch))
 
         self.log_dict({
             "val/Loss":   valid_loss_epoch,
