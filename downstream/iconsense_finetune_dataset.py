@@ -234,7 +234,7 @@ class SeqDatasetGenerator:
         for split, num_split_samples in num_samples_dict.items():
             num_negative = num_split_samples[config.negative_label_index]
             num_positive = sum(num_split_samples.values()) - num_negative
-            neg_pos_ratio = num_negative / num_positive
+            neg_pos_ratio = num_negative / num_positive if num_positive > 0 else 1
 
             print(f"{split} num_positive: {num_positive} num_negative: {num_negative} neg_pos_ratio: {neg_pos_ratio:.2f}")
 
