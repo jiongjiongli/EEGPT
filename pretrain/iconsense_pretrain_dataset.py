@@ -16,7 +16,7 @@ from sklearn.model_selection import train_test_split
 import torch
 from torch.utils.data import Dataset, DataLoader, TensorDataset, Subset
 
-from iconsense_finetune_dataset import SeqDatasetGenerator, get_dir_path
+from iconsense_finetune_dataset import SeqDatasetGenerator, IconsenseSmallDataset, get_dir_path
 
 
 def get_subject_id(session_dir_path):
