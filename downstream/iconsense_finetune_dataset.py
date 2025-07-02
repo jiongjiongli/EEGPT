@@ -213,7 +213,8 @@ class SeqDatasetGenerator:
     def get_datasets_stat(self, fold_idx, datasets):
         config = self.config
 
-        print(f"Fold {fold_idx + 1} / {config.n_splits}")
+        n_splits = config.n_splits if config.trainval else 1
+        print(f"Fold {fold_idx + 1} / {n_splits}")
 
         for split, dataset in datasets.items():
             print(f"{split}:{len(dataset)}")
