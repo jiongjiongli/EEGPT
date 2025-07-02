@@ -90,6 +90,8 @@ class LitEEGPT(pl.LightningModule):
 
         self.loss_fn        = torch.nn.MSELoss()
 
+        self.is_sanity=True
+
         self.train_loss1_epoch = []
         self.train_loss2_epoch = []
         self.train_loss_epoch = []
@@ -254,7 +256,10 @@ class LitEEGPT(pl.LightningModule):
         return super().on_validation_epoch_start()
 
     def on_validation_epoch_end(self) -> None:
-        print(self.valid_loss1_epoch, len(self.valid_loss1_epoch))
+        if self.is_sanity:
+            self.is_sanity=False
+            return super().on_validation_epoch_end()
+
         valid_loss1_epoch= torch.mean(torch.stack(self.valid_loss1_epoch))
         valid_loss2_epoch= torch.mean(torch.stack(self.valid_loss2_epoch))
         valid_loss_epoch= torch.mean(torch.stack(self.valid_loss_epoch))
