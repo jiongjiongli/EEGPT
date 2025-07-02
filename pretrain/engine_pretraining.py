@@ -98,8 +98,8 @@ class LitEEGPT(pl.LightningModule):
         self.valid_loss2_epoch = []
         self.valid_loss_epoch = []
 
-        self.preds_epoch = []
-        self.targets_epoch = []
+        self.valid_preds = []
+        self.valid_targets = []
         self.test_preds = []
         self.test_targets = []
 
@@ -219,52 +219,57 @@ class LitEEGPT(pl.LightningModule):
 
         return super().on_train_batch_end(outputs, batch, batch_idx)
 
-    def on_validation_epoch_start(self) -> None:
+    def on_train_epoch_start(self) -> None:
         self.train_loss1_epoch = []
         self.train_loss2_epoch = []
         self.train_loss_epoch = []
 
-        self.valid_loss1_epoch = []
-        self.valid_loss2_epoch = []
-        self.valid_loss_epoch = []
+        return super().on_train_epoch_start()
 
-        self.preds_epoch = []
-        self.targets_epoch = []
-        self.test_preds = []
-        self.test_targets = []
-
-        return super().on_validation_epoch_start()
-
-    def on_validation_epoch_end(self) -> None:
+    def on_train_epoch_end(self) -> None:
         train_loss1_epoch = torch.mean(torch.cat(self.train_loss1_epoch))
         train_loss2_epoch= torch.mean(torch.cat(self.train_loss2_epoch))
         train_loss_epoch= torch.mean(torch.cat(self.train_loss_epoch))
-
-        valid_loss1_epoch= torch.mean(torch.cat(self.valid_loss1_epoch))
-        valid_loss2_epoch= torch.mean(torch.cat(self.valid_loss2_epoch))
-        valid_loss_epoch= torch.mean(torch.cat(self.valid_loss_epoch))
 
         self.log_dict({
             "train/Loss": train_loss_epoch,
             "train/L1":   train_loss1_epoch,
             "train/L2":   train_loss2_epoch,
-            "val/Loss":   valid_loss_epoch,
-            "val/L1":     valid_loss1_epoch,
-            "val/L2":     valid_loss2_epoch,
         }, prog_bar=True)
 
         self.train_loss1_epoch.clear()
         self.train_loss2_epoch.clear()
         self.train_loss_epoch.clear()
 
+        return super().on_train_epoch_end()
+
+    def on_validation_epoch_start(self) -> None:
+        self.valid_loss1_epoch = []
+        self.valid_loss2_epoch = []
+        self.valid_loss_epoch = []
+
+        self.valid_preds = []
+        self.valid_targets = []
+
+        return super().on_validation_epoch_start()
+
+    def on_validation_epoch_end(self) -> None:
+        valid_loss1_epoch= torch.mean(torch.cat(self.valid_loss1_epoch))
+        valid_loss2_epoch= torch.mean(torch.cat(self.valid_loss2_epoch))
+        valid_loss_epoch= torch.mean(torch.cat(self.valid_loss_epoch))
+
+        self.log_dict({
+            "val/Loss":   valid_loss_epoch,
+            "val/L1":     valid_loss1_epoch,
+            "val/L2":     valid_loss2_epoch,
+        }, prog_bar=True)
+
         self.valid_loss1_epoch.clear()
         self.valid_loss2_epoch.clear()
         self.valid_loss_epoch.clear()
 
-        self.preds_epoch.clear()
-        self.targets_epoch.clear()
-        self.test_preds.clear()
-        self.test_targets.clear()
+        self.valid_preds.clear()
+        self.valid_targets.clear()
 
         return super().on_validation_epoch_end()
 
