@@ -107,7 +107,7 @@ config_dict = dict(
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
 
     batch_size = 64,
-    epochs=50,
+    epochs=300,
 
     model_log_dir = "./logs",
     kaggle_model_log_dir = "/kaggle/working/logs",

@@ -90,6 +90,19 @@ class LitEEGPT(pl.LightningModule):
 
         self.loss_fn        = torch.nn.MSELoss()
 
+        self.train_loss1_epoch = []
+        self.train_loss2_epoch = []
+        self.train_loss_epoch = []
+
+        self.valid_loss1_epoch = []
+        self.valid_loss2_epoch = []
+        self.valid_loss_epoch = []
+
+        self.preds_epoch = []
+        self.targets_epoch = []
+        self.test_preds = []
+        self.test_targets = []
+
     def make_masks(self, num_patchs, mC_x=5, p_n_y=0.5, p_c_y=0.2):
 
         C, N = num_patchs
@@ -156,6 +169,10 @@ class LitEEGPT(pl.LightningModule):
         self.log('valid_loss2', loss2, on_epoch=True, on_step=False, sync_dist=True)
         self.log('valid_loss' , loss , on_epoch=True, on_step=False, sync_dist=True)
 
+        self.valid_loss1_epoch.append(loss1.clone().detach())
+        self.valid_loss2_epoch.append(loss2.clone().detach())
+        self.valid_loss_epoch.append(loss2.clone().detach())
+
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -175,6 +192,10 @@ class LitEEGPT(pl.LightningModule):
         # -- Reconstruct
         self.log('train_loss2', loss2, on_epoch=True, on_step=False, sync_dist=True)
         self.log('train_loss' , loss , on_epoch=True, on_step=False, sync_dist=True)
+
+        self.train_loss1_epoch.append(loss1.clone().detach())
+        self.train_loss2_epoch.append(loss2.clone().detach())
+        self.train_loss_epoch.append(loss2.clone().detach())
 
         return loss
 
@@ -197,6 +218,55 @@ class LitEEGPT(pl.LightningModule):
                 param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
 
         return super().on_train_batch_end(outputs, batch, batch_idx)
+
+    def on_validation_epoch_start(self) -> None:
+        self.train_loss1_epoch = []
+        self.train_loss2_epoch = []
+        self.train_loss_epoch = []
+
+        self.valid_loss1_epoch = []
+        self.valid_loss2_epoch = []
+        self.valid_loss_epoch = []
+
+        self.preds_epoch = []
+        self.targets_epoch = []
+        self.test_preds = []
+        self.test_targets = []
+
+        return super().on_validation_epoch_start()
+
+    def on_validation_epoch_end(self) -> None:
+        train_loss1_epoch = torch.mean(torch.cat(self.train_loss1_epoch))
+        train_loss2_epoch= torch.mean(torch.cat(self.train_loss2_epoch))
+        train_loss_epoch= torch.mean(torch.cat(self.train_loss_epoch))
+
+        valid_loss1_epoch= torch.mean(torch.cat(self.valid_loss1_epoch))
+        valid_loss2_epoch= torch.mean(torch.cat(self.valid_loss2_epoch))
+        valid_loss_epoch= torch.mean(torch.cat(self.valid_loss_epoch))
+
+        self.log_dict({
+            "train/Loss": train_loss_epoch,
+            "train/L1":   train_loss1_epoch,
+            "train/L2":   train_loss2_epoch,
+            "val/Loss":   valid_loss_epoch,
+            "val/L1":     valid_loss1_epoch,
+            "val/L2":     valid_loss2_epoch,
+        }, prog_bar=True)
+
+        self.train_loss1_epoch.clear()
+        self.train_loss2_epoch.clear()
+        self.train_loss_epoch.clear()
+
+        self.valid_loss1_epoch.clear()
+        self.valid_loss2_epoch.clear()
+        self.valid_loss_epoch.clear()
+
+        self.preds_epoch.clear()
+        self.targets_epoch.clear()
+        self.test_preds.clear()
+        self.test_targets.clear()
+
+        return super().on_validation_epoch_end()
 
 
     def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
