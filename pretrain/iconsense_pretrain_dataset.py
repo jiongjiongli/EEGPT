@@ -155,7 +155,7 @@ def get_seq_datasets(config):
         num_split_neg_pos_samples = dataset_generator.get_datasets_stat(fold_idx, datasets)
 
         train_dataset = datasets["train"]
-        valid_dataset = datasets["valid"]
+        valid_dataset = datasets["val"]
 
         pretrain_datasets = {}
 
