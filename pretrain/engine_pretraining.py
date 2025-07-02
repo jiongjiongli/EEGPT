@@ -328,9 +328,9 @@ class LitEEGPT(pl.LightningModule):
         lr_dict = {
             'scheduler': lr_scheduler, # The LR scheduler instance (required)
             # The unit of the scheduler's step size, could also be 'step'
-            'interval': 'step',
+            'interval': 'epoch',
             'frequency': 1, # The frequency of the scheduler
-            'monitor': 'valid_loss', # Metric for `ReduceLROnPlateau` to monitor
+            'monitor': 'val/loss', # Metric for `ReduceLROnPlateau` to monitor
             'strict': True, # Whether to crash the training if `monitor` is not found
             'name': None, # Custom name for `LearningRateMonitor` to use
         }
