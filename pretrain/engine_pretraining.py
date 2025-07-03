@@ -318,7 +318,7 @@ class LitEEGPT(pl.LightningModule):
 
         (best_threshold, best_f1, best_result, thresholds, f1s) = find_best_f1(positive_pred_losses,
                                                                                negative_pred_losses)
-        return best_threshold, test_f1
+        return best_threshold, best_f1
 
 
     def on_train_batch_start(self, batch: Any, batch_idx: int):
