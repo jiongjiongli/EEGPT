@@ -319,7 +319,7 @@ class LitEEGPT(pl.LightningModule):
 
         (best_threshold, best_f1, best_result, thresholds, f1s) = find_best_f1(positive_pred_losses,
                                                                                negative_pred_losses)
-        return best_threshold, best_f1
+        return best_threshold, best_f1, best_result
 
 
     def on_train_batch_start(self, batch: Any, batch_idx: int):
@@ -382,9 +382,9 @@ class LitEEGPT(pl.LightningModule):
             return super().on_validation_epoch_end()
 
          # self.positive_valid_loader and self.negative_valid_loader
-        valid_threshold, valid_f1 = self.evaluate(self.positive_valid_loader,
+        valid_threshold, valid_f1, (val_tp, val_fn, val_fp, val_tn) = self.evaluate(self.positive_valid_loader,
                                                   self.negative_valid_loader)
-        test_threshold, test_f1  = self.evaluate(self.positive_test_loader,
+        test_threshold, test_f1, (test_tp, test_fn, test_fp, test_tn)  = self.evaluate(self.positive_test_loader,
                                                  self.negative_test_loader,
                                                  threshold=valid_threshold)
 
@@ -402,6 +402,8 @@ class LitEEGPT(pl.LightningModule):
 
 
         print(f"epoch={self.current_epoch} threshold={valid_threshold} valid_f1={valid_f1} test_f1={test_f1}")
+        print(f"epoch={self.current_epoch} val  result: tp={val_tp}, fn={val_fn}, fp={val_fp}, tn={val_tn}")
+        print(f"epoch={self.current_epoch} test result: tp={test_tp}, fn={test_fn}, fp={test_fp}, tn={test_tn}")
 
         self.log("val_F1", valid_f1)
 
