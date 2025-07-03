@@ -83,6 +83,7 @@ def get_sub_based_dataset(config):
         num_seqs = len(eeg_data_df) // sample_seq_len
         # shape: [num_seqs * (seq_len * 2), num_channels]
         seqs = eeg_data_df.iloc[:num_seqs * sample_seq_len].to_numpy()
+        seqs = np.clip(seqs, -100, 100)
         # shape: [num_seqs, (seq_len * 2), num_channels]
         seqs = seqs.reshape(num_seqs, sample_seq_len, config.num_channels)
         # shape: [num_seqs, num_channels, (seq_len * 2)]

@@ -81,7 +81,8 @@ def find_best_f1(positive_losses, negative_losses, step=0.01):
 
     for i, threshold in enumerate(thresholds):
         (tp, fn, fp, tn), f1 = calculate_f1(positive_losses,
-                                            negative_losses, threshold)
+                                            negative_losses,
+                                            threshold)
 
         result = (tp, fn, fp, tn)
         results.append(result)
@@ -398,6 +399,9 @@ class LitEEGPT(pl.LightningModule):
             "val/L1":     valid_loss1_epoch,
             "val/L2":     valid_loss2_epoch,
         }, prog_bar=True)
+
+
+        print(f"epoch={self.current_epoch} threshold={valid_threshold} valid_f1={valid_f1} test_f1={test_f1}")
 
         self.log("val_F1", valid_f1)
 
