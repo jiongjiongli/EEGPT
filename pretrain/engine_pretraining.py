@@ -281,18 +281,19 @@ class LitEEGPT(pl.LightningModule):
 
         return loss, loss1, loss2
 
+    @torch.no_grad()
     def evaluate(self, positive_loader, negative_loader):
         positive_pred_loss = []
         negative_pred_loss = []
 
-        with torch.no_grad():
-            for batch in positive_loader:
-                loss, loss1, loss2 = self.predict_loss(model, batch)
-                positive_pred_loss.append(loss2)
 
-            for batch in negative_loader:
-                loss, loss1, loss2 = self.predict_loss(model, batch)
-                negative_pred_loss.append(loss2)
+        for batch in positive_loader:
+            loss, loss1, loss2 = self.predict_loss(batch)
+            positive_pred_loss.append(loss2)
+
+        for batch in negative_loader:
+            loss, loss1, loss2 = self.predict_loss(batch)
+            negative_pred_loss.append(loss2)
 
         positive_pred_losses = np.concat(positive_pred_loss)
         negative_pred_losses = np.concat(negative_pred_loss)
