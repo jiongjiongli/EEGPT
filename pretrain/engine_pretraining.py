@@ -313,7 +313,7 @@ class LitEEGPT(pl.LightningModule):
         negative_pred_losses = np.concat(negative_pred_loss)
 
         if threshold:
-            f1 = calculate_f1(positive_pred_losses, negative_pred_losses, threshold)
+            _, f1 = calculate_f1(positive_pred_losses, negative_pred_losses, threshold)
             return threshold, f1
 
         (best_threshold, best_f1, best_result, thresholds, f1s) = find_best_f1(positive_pred_losses,
@@ -459,7 +459,7 @@ class LitEEGPT(pl.LightningModule):
         lr_dict = {
             'scheduler': lr_scheduler, # The LR scheduler instance (required)
             # The unit of the scheduler's step size, could also be 'step'
-            'interval': 'epoch',
+            'interval': 'step',
             'frequency': 1, # The frequency of the scheduler
             'monitor': 'val/loss', # Metric for `ReduceLROnPlateau` to monitor
             'strict': True, # Whether to crash the training if `monitor` is not found
