@@ -15,20 +15,22 @@ engine_pretraining.seed_torch(7)
 
 
 model = engine_pretraining.LitEEGPT(
-                configs.get_config(**(configs.MODELS_CONFIGS[configs.tag])),
-                configs.positive_valid_loader,
-                configs.negative_valid_loader,
+                models_configs=configs.get_config(**(configs.MODELS_CONFIGS[configs.tag])),
+                positive_valid_loader=configs.positive_valid_loader,
+                negative_valid_loader=configs.negative_valid_loader,
+                positive_test_loader=configs.positive_test_loader,
+                negative_test_loader=configs.negative_test_loader,
                 USE_LOSS_A =(configs.variant != "A"),
                 USE_LN     =(configs.variant != "B"),
                 USE_SKIP   =(configs.variant != "C"))
 
 checkpoint_cb = ModelCheckpoint(
-    save_top_k=10,                      # save only the best checkpoint
+    save_top_k=5,                      # save only the best checkpoint
     monitor='val/F1',               # metric to monitor (make sure it's logged)
-    mode='min',                       # 'min' if lower is better, 'max' otherwise
+    mode='max',                       # 'min' if lower is better, 'max' otherwise
     save_last=True,                   # also save the last checkpoint
     dirpath='./checkpoints/',         # directory to save checkpoints
-    filename='EEGPT_{epoch:03d}-{val_loss:.4f}'  # naming pattern
+    filename='EEGPT_{epoch:03d}_{val_F1:.4f}'  # naming pattern
 )
 
 lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval='epoch')

@@ -42,6 +42,20 @@ def compute_f1(tp, fp, fn):
         return 0.0
     return 2 * precision * recall / (precision + recall)
 
+
+def calculate_f1(positive_losses, negative_losses, threshold):
+    num_pos = len(positive_losses)
+    num_neg = len(negative_losses)
+
+    tp = np.sum(positive_losses > threshold)
+    fn = num_pos - tp
+    fp = np.sum(negative_losses > threshold)
+    tn = num_neg - fp
+
+    f1 = compute_f1(tp, fp, fn)
+    return (tp, fn, fp, tn), f1
+
+
 def find_best_f1(positive_losses, negative_losses, step=0.01):
     """
     Finds the threshold that maximizes the F1 score.
@@ -58,9 +72,6 @@ def find_best_f1(positive_losses, negative_losses, step=0.01):
         all_thresholds (np.ndarray): All thresholds tested.
         all_f1s (np.ndarray): Corresponding F1 scores.
     """
-    num_pos = len(positive_losses)
-    num_neg = len(negative_losses)
-
     min_threshold = np.mean([np.min(positive_losses), np.min(negative_losses)])
     max_threshold = np.mean([np.max(positive_losses), np.max(negative_losses)])
     thresholds = np.arange(min_threshold, max_threshold + step, step)
@@ -69,15 +80,13 @@ def find_best_f1(positive_losses, negative_losses, step=0.01):
     results = []
 
     for i, threshold in enumerate(thresholds):
-        tp = np.sum(positive_losses > threshold)
-        fn = num_pos - tp
-        fp = np.sum(negative_losses > threshold)
-        tn = num_neg - fp
+        (tp, fn, fp, tn), f1 = calculate_f1(positive_losses,
+                                            negative_losses, threshold)
 
         result = (tp, fn, fp, tn)
         results.append(result)
 
-        f1s[i] = compute_f1(tp, fp, fn)
+        f1s[i] = f1
 
     best_idx = np.argmax(f1s)
     best_threshold = thresholds[best_idx]
@@ -89,9 +98,12 @@ def find_best_f1(positive_losses, negative_losses, step=0.01):
 
 class LitEEGPT(pl.LightningModule):
 
-    def __init__(self, models_configs,
-                 positive_valid_loader,
-                 negative_valid_loader,
+    def __init__(self,
+                 models_configs=None,
+                 positive_valid_loader=None,
+                 negative_valid_loader=None,
+                 positive_test_loader=None,
+                 negative_test_loader=None,
                  USE_LOSS_A=True, USE_LN=True, USE_SKIP=True):
         super().__init__()
         self.USE_LOSS_A = USE_LOSS_A
@@ -100,6 +112,8 @@ class LitEEGPT(pl.LightningModule):
 
         self.positive_valid_loader = positive_valid_loader
         self.negative_valid_loader = negative_valid_loader
+        self.positive_test_loader  = positive_test_loader
+        self.negative_test_loader  = negative_test_loader
 
         encoder = EEGTransformer(
             # img_size=[58, 256*4],
@@ -282,7 +296,7 @@ class LitEEGPT(pl.LightningModule):
         return loss, loss1, loss2
 
     @torch.no_grad()
-    def evaluate(self, positive_loader, negative_loader):
+    def evaluate(self, positive_loader, negative_loader, threshold=None):
         positive_pred_loss = []
         negative_pred_loss = []
 
@@ -298,9 +312,13 @@ class LitEEGPT(pl.LightningModule):
         positive_pred_losses = np.concat(positive_pred_loss)
         negative_pred_losses = np.concat(negative_pred_loss)
 
+        if threshold:
+            f1 = calculate_f1(positive_pred_losses, negative_pred_losses, threshold)
+            return threshold, f1
+
         (best_threshold, best_f1, best_result, thresholds, f1s) = find_best_f1(positive_pred_losses,
                                                                                negative_pred_losses)
-        return best_f1
+        return best_threshold, test_f1
 
 
     def on_train_batch_start(self, batch: Any, batch_idx: int):
@@ -363,8 +381,11 @@ class LitEEGPT(pl.LightningModule):
             return super().on_validation_epoch_end()
 
          # self.positive_valid_loader and self.negative_valid_loader
-        valid_f1 = self.evaluate(self.positive_valid_loader, self.negative_valid_loader)
-
+        valid_threshold, valid_f1 = self.evaluate(self.positive_valid_loader,
+                                                  self.negative_valid_loader)
+        test_threshold, test_f1  = self.evaluate(self.positive_test_loader,
+                                                 self.negative_test_loader,
+                                                 threshold=valid_threshold)
 
         valid_loss1_epoch= torch.mean(torch.stack(self.valid_loss1_epoch))
         valid_loss2_epoch= torch.mean(torch.stack(self.valid_loss2_epoch))
@@ -372,10 +393,13 @@ class LitEEGPT(pl.LightningModule):
 
         self.log_dict({
             "val/F1":     valid_f1,
+            "test/F1":    test_f1,
             "val/Loss":   valid_loss_epoch,
             "val/L1":     valid_loss1_epoch,
             "val/L2":     valid_loss2_epoch,
         }, prog_bar=True)
+
+        self.log("val_F1", valid_f1)
 
         self.valid_loss1_epoch.clear()
         self.valid_loss2_epoch.clear()

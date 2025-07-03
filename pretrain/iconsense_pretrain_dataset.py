@@ -160,24 +160,24 @@ def get_seq_datasets(config):
         pretrain_datasets = {}
 
         for split, dataset in datasets.items():
-            if split == "test":
-                pretrain_datasets[split] = dataset
-            else:
-                label_to_inputs = {}
+            # if split == "test":
+            #     pretrain_datasets[split] = dataset
+            # else:
+            label_to_inputs = {}
 
-                for sample in dataset:
-                    input_data, label_index = sample
-                    label_to_inputs.setdefault(label_index, [])
-                    label_to_inputs[label_index].append(input_data)
+            for sample in dataset:
+                input_data, label_index = sample
+                label_to_inputs.setdefault(label_index, [])
+                label_to_inputs[label_index].append(input_data)
 
-                for label_index, seqs in label_to_inputs.items():
-                    inputs = np.array(seqs)
-                    labels = np.array([label_index] * len(seqs))
+            for label_index, seqs in label_to_inputs.items():
+                inputs = np.array(seqs)
+                labels = np.array([label_index] * len(seqs))
 
-                    samples_info = {"inputs": inputs, "labels": labels}
-                    pretrain_dataset = IconsenseSmallDataset(samples_info)
-                    pretrain_datasets.setdefault(split, {})
-                    pretrain_datasets[split][label_index] = pretrain_dataset
+                samples_info = {"inputs": inputs, "labels": labels}
+                pretrain_dataset = IconsenseSmallDataset(samples_info)
+                pretrain_datasets.setdefault(split, {})
+                pretrain_datasets[split][label_index] = pretrain_dataset
 
         return pretrain_datasets
 
