@@ -314,8 +314,8 @@ class LitEEGPT(pl.LightningModule):
         negative_pred_losses = np.concat(negative_pred_loss)
 
         if threshold:
-            _, f1 = calculate_f1(positive_pred_losses, negative_pred_losses, threshold)
-            return threshold, f1
+            result, f1 = calculate_f1(positive_pred_losses, negative_pred_losses, threshold)
+            return threshold, f1, result
 
         (best_threshold, best_f1, best_result, thresholds, f1s) = find_best_f1(positive_pred_losses,
                                                                                negative_pred_losses)
