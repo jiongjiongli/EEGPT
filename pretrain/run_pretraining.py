@@ -14,14 +14,17 @@ engine_pretraining.seed_torch(7)
 # init model
 
 
-model = engine_pretraining.LitEEGPT(configs.get_config(**(configs.MODELS_CONFIGS[configs.tag])),
-                 USE_LOSS_A =(configs.variant != "A"),
-                 USE_LN     =(configs.variant != "B"),
-                 USE_SKIP   =(configs.variant != "C"))
+model = engine_pretraining.LitEEGPT(
+                configs.get_config(**(configs.MODELS_CONFIGS[configs.tag])),
+                configs.positive_valid_loader,
+                configs.negative_valid_loader,
+                USE_LOSS_A =(configs.variant != "A"),
+                USE_LN     =(configs.variant != "B"),
+                USE_SKIP   =(configs.variant != "C"))
 
 checkpoint_cb = ModelCheckpoint(
-    save_top_k=1,                      # save only the best checkpoint
-    monitor='val/Loss',               # metric to monitor (make sure it's logged)
+    save_top_k=10,                      # save only the best checkpoint
+    monitor='val/F1',               # metric to monitor (make sure it's logged)
     mode='min',                       # 'min' if lower is better, 'max' otherwise
     save_last=True,                   # also save the last checkpoint
     dirpath='./checkpoints/',         # directory to save checkpoints

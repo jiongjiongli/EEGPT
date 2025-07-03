@@ -123,7 +123,13 @@ config = SimpleNamespace(**config_dict)
 datasets = get_seq_datasets(config)
 train_dataset = datasets["train"][config.negative_label_index]
 valid_dataset = datasets["val"][config.negative_label_index]
-test_dataset = datasets["test"]
+test_dataset = datasets["test"][config.negative_label_index]
+
+positive_valid_dataset = datasets["val"][config.positive_label_index]
+negative_valid_dataset = datasets["val"][config.negative_label_index]
+
+positive_test_dataset = datasets["test"][config.positive_label_index]
+negative_test_dataset = datasets["test"][config.negative_label_index]
 
 max_epochs = config.epochs
 max_lr = config.max_lr
@@ -141,6 +147,22 @@ test_loader = DataLoader(test_dataset,
                          batch_size=config.batch_size,
                          shuffle=False)
 
+
+positive_valid_loader = DataLoader(positive_valid_dataset,
+                         batch_size=config.batch_size,
+                         shuffle=False)
+
+negative_valid_loader = DataLoader(negative_valid_dataset,
+                         batch_size=config.batch_size,
+                         shuffle=False)
+
+positive_test_loader = DataLoader(positive_test_dataset,
+                         batch_size=config.batch_size,
+                         shuffle=False)
+
+negative_test_loader = DataLoader(negative_test_dataset,
+                         batch_size=config.batch_size,
+                         shuffle=False)
 
 steps_per_epoch = math.ceil(len(train_loader)/len(devices))
 
